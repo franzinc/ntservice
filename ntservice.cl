@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.8 2003/01/20 22:41:35 dancy Exp $
+;; $Id: ntservice.cl,v 1.9 2003/01/23 00:07:57 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -425,7 +425,7 @@
       (free-fobject services-returned)
       (free-fobject resume-handle))))
 
-(defun create-service (name displaystring cmdline)
+(defun create-service (name displaystring cmdline &key (start :manual))
   (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
     (multiple-value-bind (res err)
 	(CreateService 
@@ -434,7 +434,10 @@
 	 displaystring
 	 STANDARD_RIGHTS_REQUIRED 
 	 (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
-	 SERVICE_DEMAND_START
+	 (case start
+	   (:auto SERVICE_AUTO_START)
+	   (:manual SERVICE_DEMAND_START)
+	   (t (error "create-service: Unrecognized start type: ~S" start)))
 	 SERVICE_ERROR_NORMAL
 	 cmdline
 	 0 ;; no load order group

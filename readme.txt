@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.6 2003/01/20 22:41:35 dancy Exp $
+$Id: readme.txt,v 1.7 2003/01/23 00:07:57 dancy Exp $
 
 Turn your Common Lisp application into a Windows NT/2000 service with
 the ntservice package.
@@ -71,7 +71,7 @@ add/remove the service easily.
 
 The definition for ntservice:create-service is as follows:
 
-(defun create-service (name displaystring cmdline)
+(defun create-service (name displaystring cmdline &key (start :manual))
   ...)
 
 'name' should be a string that identifies your service.  The maximum
@@ -89,6 +89,10 @@ comparisons are always case-insensitive.
 'cmdline' should be a string that contains the command line for
 executing your service program.  The first word in the string should
 be the fully-qualified pathname to the executable.
+
+'start' can either be :manual or :auto.  If :manual, the service must
+be started and stopped manually.  If :auto, the service will start
+automatically at boot time.
 
 Return values:
 If create-service is successful, it returns 't'.  If it is not

@@ -1,3 +1,10 @@
+2003-01-22    <dancy@DANCYSOFT>
+
+	* ntservice.cl (create-service): Added keyword argument :start to
+	create-service to control how the service should shart.
+
+	* readme.txt: Updated documentation for above.
+
 2003-01-20    <dancy@CANDY2K>
 
 	* ntservice.cl:  

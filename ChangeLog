@@ -1,5 +1,8 @@
 2001-11-27    <dancy@CANDY2K>
 
+	* ntservice.cl:  changed the way package exports are done to work
+	in different case modes.
+
 	* readme.txt:  Hopefully clarified proper use of this package.
 
 	* testapp.cl:  Example application.

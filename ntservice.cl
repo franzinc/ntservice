@@ -21,13 +21,13 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.3 2001/11/27 18:25:10 dancy Exp $
+;; $Id: ntservice.cl,v 1.4 2001/11/27 18:57:20 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
-  (:export "start-service"
-	   "create-service"
-	   "delete-service"))
+  (:export #:start-service
+	   #:create-service
+	   #:delete-service))
 
 (in-package :ntservice)
 

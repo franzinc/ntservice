@@ -1,7 +1,7 @@
-Turn your lisp application into a Windows NT/2000 service with the
-ntservice package.
+Turn your Common Lisp application into a Windows NT/2000 service with
+the ntservice package.
 
-If you have a lisp application that you'd like to start up
+If you have a Common Lisp application that you'd like to start up
 automatically when the system starts... and shut down cleanly when the
 system is shutting down, then this package is for you.
 
@@ -67,7 +67,7 @@ Example:
 
 (ntservice:create-service 
 	"MyService" 
-	"My lisp program service" 
+	"My Common Lisp program service" 
 	"c:\\devel\\program\\program.exe /runfast /dontcrash")
 
 ntservice:create-service returns '1' if all is well.

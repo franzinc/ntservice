@@ -1,4 +1,4 @@
-Turn your lisp application into an Windows NT/2000 service with the
+Turn your lisp application into a Windows NT/2000 service with the
 ntservice package.
 
 If you have a lisp application that you'd like to start up
@@ -21,7 +21,7 @@ is as follows:
 
 'main' should be a function (or a symbol naming function) which
 constitutes the main loop of your program.  This function will be
-called when the service starts running.  
+called when the service starts running.
 
 The keyword arguments 'init' and 'stop' are optional.  
 
@@ -34,7 +34,7 @@ non-nil under normal circumstances.
 
 'stop' specifies a function (or a symbol naming a function) that
 should be executed when the service is to be stopped.  Such a function
-might do work to ensure that the service stops cleanly.  
+might do work to ensure that the service stops cleanly.
 
 4) Make your application into a standalone executable (check the
 Allegro CL product documentation on generate-executable [Allegro CL

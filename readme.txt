@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.4 2001/11/27 18:53:21 dancy Exp $
+$Id: readme.txt,v 1.5 2001/11/28 21:26:33 dancy Exp $
 
 Turn your Common Lisp application into a Windows NT/2000 service with
 the ntservice package.
@@ -35,7 +35,8 @@ Follow these steps and you'll be on the road to servicedom.
 'main' should be a function (or a symbol naming a function) which
 constitutes the main loop of your program.  This function will be
 called when the service starts running.  No arguments are passed to
-this function.
+this function.  This function should never return [if it does, Windows
+will complain that the service terminated prematurely].
 
 The keyword arguments 'init' and 'stop' are optional.  
 

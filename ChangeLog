@@ -1,3 +1,7 @@
+2002-02-27  Kevin Layer  <layer@crikey>
+
+	* ntservice.cl: add tray icon watcher
+
 2001-12-06  Ahmon Dancy  <dancy@dancy>
 
 	* ntservice.cl: Updated some of the foreign function definitions

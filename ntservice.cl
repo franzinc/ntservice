@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.5 2001/12/06 19:47:49 dancy Exp $
+;; $Id: ntservice.cl,v 1.6 2002/02/27 22:41:13 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -107,6 +107,11 @@
 
 (def-foreign-call (DeleteService "DeleteService") () 
   :returning :int :strings-convert t)
+
+#+(version>= 6 2 :pre-beta 13)
+(def-foreign-call (start_tray_icon_watcher "start_tray_icon_watcher") ()
+  :returning :int
+  :strings-convert nil)
 
 ;;; constants
 
@@ -295,6 +300,9 @@
 
       (mp:start-customs) ;; rfr recommendation.
 
+      #+(version>= 6 2 :pre-beta 13)
+      (start_tray_icon_watcher) ; ensure that tray icon visible after login
+      
       (setf (st-slot 0 'lpServiceName) service-name)  ;; unused
       (setf (st-slot 0 'lpServiceProc) ServiceMainAddr)
       ;; the null terminating entry

@@ -1,3 +1,8 @@
+2001-12-06  Ahmon Dancy  <dancy@dancy>
+
+	* ntservice.cl: Updated some of the foreign function definitions
+	to be more friendly in different case mode environments
+
 2001-11-27    <dancy@CANDY2K>
 
 	* ntservice.cl:  changed the way package exports are done to work

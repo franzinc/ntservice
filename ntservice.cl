@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.4 2001/11/27 18:57:20 dancy Exp $
+;; $Id: ntservice.cl,v 1.5 2001/12/06 19:47:49 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -70,11 +70,13 @@
     :strings-convert t
     :returning :int)
 
-(def-foreign-call SetServiceStatus () :returning :int :strings-convert t)
+(def-foreign-call (SetServiceStatus "SetServiceStatus") () 
+  :returning :int :strings-convert t)
 
-(def-foreign-call GetLastError () :returning :int :strings-convert t)
+(def-foreign-call (GetLastError "GetLastError") () 
+  :returning :int :strings-convert t)
 
-(def-foreign-call DebugBreak () :strings-convert t)
+(def-foreign-call (DebugBreak "DebugBreak") () :strings-convert t)
 
 (def-foreign-call (OutputDebugString "OutputDebugStringA") () 
   :strings-convert t)
@@ -83,7 +85,7 @@
   :strings-convert t
   :returning :int)
 
-(def-foreign-call CloseServiceHandle ((hSCObject :int)) 
+(def-foreign-call (CloseServiceHandle "CloseServiceHandle") ((hSCObject :int)) 
   :strings-convert t
   :returning :int)
 
@@ -103,7 +105,8 @@
   :returning :int
   :strings-convert t)
 
-(def-foreign-call DeleteService () :returning :int :strings-convert t)
+(def-foreign-call (DeleteService "DeleteService") () 
+  :returning :int :strings-convert t)
 
 ;;; constants
 

@@ -1,3 +1,37 @@
+2003-01-20    <dancy@CANDY2K>
+
+	* ntservice.cl:  
+
+	Added a winstrerror function which takes a
+	Windows error code as input and returns an error string (with
+	newline at the end).
+
+	Changed some of the foreign function definitions/calls to use the
+	:error-value :os-specific return values.  
+
+	Modified the with-open-service macro to allow for finer error
+	handling.
+
+	create-service used to error if the CreateService call failed.
+	Now it turns (values nil err), where 'err' is the Windows error
+	code for the failure.   It returns 't' if all is well.
+
+	delete-service used to error if with-open-service failed or if
+	DeleteService failed.  Now it returns 
+	(values nil err errplace), where 'err' is the Windows error code
+	for the failure and 'errplace' is a string which has the name of
+	the API call that actually failed.  It returns 't' if all is well.
+
+	* readme.txt:  Updated to describe the new return values for
+	create-service/delete-service.  The example shows use of the new
+	return values and a call to ntservice:winstrerror. 
+
+	* testapp.cl: Updated to reflect the create-servic and
+	delete-service changes.  Also, it gets the EXE path from the
+	command line instead of hard coding it now.  This turns out to be
+	very convenient.  
+	
+
 2002-02-27  Kevin Layer  <layer@crikey>
 
 	* ntservice.cl: add tray icon watcher

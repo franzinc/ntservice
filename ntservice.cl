@@ -21,13 +21,14 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.7 2002/09/19 20:21:32 dancy Exp $
+;; $Id: ntservice.cl,v 1.8 2003/01/20 22:41:35 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
   (:export #:start-service
 	   #:create-service
-	   #:delete-service))
+	   #:delete-service
+	   #:winstrerror))
 
 (in-package :ntservice)
 
@@ -91,6 +92,7 @@
 
 (def-foreign-call (OpenService "OpenServiceA") () 
   :strings-convert t
+  :error-value :os-specific
   :returning :int)
 
 (def-foreign-call (EnumServicesStatus "EnumServicesStatusA") ((hSCManager :int) (dwServiceType :int) (dwServiceState :int) (lpServices (* ENUM_SERVICE_STATUS)) (cbBufSize :int) (pcbBytesNeeded (* :int)) (lpServicesReturned (* :int)) (lpResumeHandle (* :int)))
@@ -99,6 +101,7 @@
 
 (def-foreign-call (CreateService "CreateServiceA") () 
   :returning :int 
+  :error-value :os-specific
   :strings-convert t)
 
 (def-foreign-call (StartService "StartServiceA") ()
@@ -106,7 +109,14 @@
   :strings-convert t)
 
 (def-foreign-call (DeleteService "DeleteService") () 
-  :returning :int :strings-convert t)
+  :returning :int 
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (FormatMessage "FormatMessageA") ()
+  :returning :int :strings-convert nil)
+
+(def-foreign-call LocalFree () :returning :int :strings-convert nil)
 
 #+(version>= 6 2 :pre-beta 13)
 (def-foreign-call (start_tray_icon_watcher "start_tray_icon_watcher") ()
@@ -197,6 +207,15 @@
 (defparameter NO_ERROR 0)
 (defparameter ERROR_MORE_DATA 234)
 (defparameter ERROR_SERVICE_SPECIFIC_ERROR 1066)
+
+;; FormatMessage stuff
+(defparameter FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
+(defparameter FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
+(defparameter FORMAT_MESSAGE_FROM_STRING     #x00000400)
+(defparameter FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
+(defparameter FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
+(defparameter FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
+(defparameter FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
 
 ;; globals
 
@@ -360,19 +379,17 @@
        (close-sc-manager ,handle))))
 
 (defun open-service (smhandle name desired-access)
-  (let (shandle err)
-    (without-interrupts
-      (setf shandle (OpenService smhandle name desired-access))
-      (setf err (GetLastError)))
-    (if (= 0 shandle)
-	(error "OpenService failed w/ error code ~D" err))
-    shandle))
+  (multiple-value-bind (shandle err)
+      (OpenService smhandle name desired-access)
+    (values (if (= 0 shandle) nil shandle) err)))
 
-(defmacro with-open-service ((handle smhandle name desired-access) &body body)
-  `(let ((,handle (open-service ,smhandle ,name ,desired-access)))
+(defmacro with-open-service ((handle errvar smhandle name desired-access) 
+			     &body body)
+  `(multiple-value-bind (,handle ,errvar)
+       (open-service ,smhandle ,name ,desired-access)
      (unwind-protect
 	 (progn ,@body)
-       (CloseServiceHandle ,handle))))
+       (if ,handle (CloseServiceHandle ,handle)))))
 
 ;;; just a test function.
 (defun enum-services ()
@@ -410,34 +427,59 @@
 
 (defun create-service (name displaystring cmdline)
   (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
-    (let (res err)
-      (without-interrupts
-	(setf res (CreateService 
-		   schandle 
-		   name
-		   displaystring
-		   STANDARD_RIGHTS_REQUIRED 
-		   (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
-		   SERVICE_DEMAND_START
-		   SERVICE_ERROR_NORMAL
-		   cmdline
-		   0 ;; no load order group
-		   0 ;; no tag identifier
-		   0 ;; no dependencies 
-		   0 ;; use LocalSystem account
-		   0)) ;; no password
-	(setf err (GetLastError)))
+    (multiple-value-bind (res err)
+	(CreateService 
+	 schandle 
+	 name
+	 displaystring
+	 STANDARD_RIGHTS_REQUIRED 
+	 (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
+	 SERVICE_DEMAND_START
+	 SERVICE_ERROR_NORMAL
+	 cmdline
+	 0 ;; no load order group
+	 0 ;; no tag identifier
+	 0 ;; no dependencies 
+	 0 ;; use LocalSystem account
+	 0) ;; no password
+      (if (/= res 0)
+	  (CloseServiceHandle res))
       (if (= res 0)
-	  (error "CreateService error code ~D" err))
-      (CloseServiceHandle res))))
+	  (values nil err)
+	(values t res)))))
 
 
 (defun delete-service (name)
   (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
-    (with-open-service (handle sc name STANDARD_RIGHTS_REQUIRED)
-      (without-interrupts 
-	(if (= 0 (DeleteService handle))
-	    (error "DeleteService failed w/ error code ~D" (GetLastError)))))))
+    (with-open-service (handle err sc name STANDARD_RIGHTS_REQUIRED)
+      (if* handle
+	 then
+	      (multiple-value-bind (res err)
+		  (DeleteService handle)
+		(if (= res 0)
+		    (values nil err "DeleteService")
+		  (values t res)))
+	 else
+	      (values nil err "OpenService")))))
+
+;;; Error message stuff
+
+(defun winstrerror (code)
+  (let ((stringptr (ff:allocate-fobject '(* :char) :foreign-static-gc))
+	res)
+    (FormatMessage
+     (logior FORMAT_MESSAGE_FROM_SYSTEM 
+	     FORMAT_MESSAGE_IGNORE_INSERTS
+	     FORMAT_MESSAGE_ALLOCATE_BUFFER) ;; dwFlags
+     0 ;; lpSource
+     code ;; dwMessageId
+     0 ;; dwLanguageId
+     stringptr ;; lpBuffer
+     0  ;; nSize
+     0) ;; Arguments
+    (setf res (native-to-string (ff:fslot-value stringptr)))
+    (LocalFree (ff:fslot-value stringptr))
+    res))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

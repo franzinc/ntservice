@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.5 2001/11/28 21:26:33 dancy Exp $
+$Id: readme.txt,v 1.6 2003/01/20 22:41:35 dancy Exp $
 
 Turn your Common Lisp application into a Windows NT/2000 service with
 the ntservice package.
@@ -90,12 +90,22 @@ comparisons are always case-insensitive.
 executing your service program.  The first word in the string should
 be the fully-qualified pathname to the executable.
 
+Return values:
+If create-service is successful, it returns 't'.  If it is not
+successful, it returns two values:  nil and the Windows error code.
+You can use ntserver:winstrerror to convert the code into a string.
+
 Example:
 
-(ntservice:create-service 
+(multiple-value-bind (success errcode)
+      (ntservice:create-service 
 	"MyService" 
 	"My Common Lisp program service" 
 	"c:\\devel\\program\\program.exe /runfast /dontcrash")
+   (if success
+       (format t "all is well~%")
+     (error "create-service failed: ~A"
+            (ntservice:winstrerror errcode))))
 
 Your service will be created w/ the following properties:
 Manual start
@@ -117,7 +127,10 @@ ntservice.fasl and evaluate:
 where 'name' is the name you gave the service in your call to
 ntservice:create-service.  It seems to be possible to request deletion
 of a running service.  This disables the service from further starts
-and marks it for deletion once it stops.
+and marks it for deletion once it stops.  delete-service turns 't' if
+the removal was successful, otherwise it returns three values: nil,
+the Windows error code, and a string with the name of the function
+that actually failed.
 
 -
 The LocalSystem account is very powerful!  Be careful of what you

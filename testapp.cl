@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.2 2002/09/19 20:21:32 dancy Exp $
+;; $Id: testapp.cl,v 1.3 2003/01/20 22:41:35 dancy Exp $
 
 (in-package :user)
 
@@ -31,7 +31,7 @@
 (defparameter *servicename* "MyService")
 (defparameter *displayname* "My Common Lisp Service")
 (defparameter *commandline* 
-    "c:\\devel\\nfs\\ntservice\\testapp\\testapp.exe arg1 arg2 arg3")
+    "arg1 arg2 arg3") ;; the executable path will be prepended.
 
 ;; 2) Save 
 ;; 3) Load this file into Allegro CL and evaluate (build)
@@ -52,16 +52,17 @@
 
 (defun main (&rest args)
   (format t "args are ~S~%" args)
-  (if (member "/install" args :test #'equalp)
-      (progn
-	(add-service)
-	(return-from main)))
-  (if (member "/remove" args :test #'equalp)
-      (progn
-	(remove-service)
-	(return-from main)))
-  (ntservice:start-service 'real-main :init 'init)
-  t)
+  (let ((exepath (pop args)))
+    (if (member "/install" args :test #'equalp)
+	(progn
+	  (add-service exepath)
+	  (return-from main)))
+    (if (member "/remove" args :test #'equalp)
+	(progn
+	  (remove-service)
+	  (return-from main)))
+    (ntservice:start-service 'real-main :init 'init)
+    t))
 
 (defun init (args) 
   (format t "Start parameters: ~S~%" args)
@@ -76,15 +77,23 @@
   (compile-file-if-needed "testapp.cl")
   (generate-executable "testapp" '("testapp.fasl" "ntservice.fasl")))
 
-(defun add-service ()
+(defun add-service (exepath)
   (format t "Installing service...~%")
-  (ntservice:create-service 
-   *servicename*
-   *displayname*
-   *commandline*)
-  (format t "Installation successful.~%"))
+  (multiple-value-bind (success errcode)
+      (ntservice:create-service 
+       *servicename*
+       *displayname*
+       (concatenate 'string exepath " " *commandline*))
+    (if success
+	(format t "Installation successful.~%")
+      (error "ntservice:create-service error: ~A"
+	     (ntservice:winstrerror errcode)))))
 
 (defun remove-service ()
   (format t "Removing service...~%")
-  (ntservice:delete-service *servicename*)
-  (format t "Removal successful.~%"))
+  (multiple-value-bind (success errcode errfunc)
+      (ntservice:delete-service *servicename*)
+    (if success
+	(format t "Removal successful.~%")
+      (error "ntservice:delete-service error in ~A: ~A"
+	     errfunc (ntservice:winstrerror errcode)))))

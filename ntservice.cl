@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.6 2002/02/27 22:41:13 layer Exp $
+;; $Id: ntservice.cl,v 1.7 2002/09/19 20:21:32 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -220,15 +220,18 @@
   ;;(in-package :ntservice)
   (let ((argv-type `(:array (* :string) ,argc))
 	(service-control-handler-addr (register-foreign-callable 'service-control-handler))
+	err
 	args)
     (dotimes (i argc)
       (push (native-to-string (fslot-value-typed argv-type :c argv i)) args))
     (setf args (rest (reverse args))) ;; drop the service name from the list
-
-    (setf service-status-handle (RegisterServiceCtrlHandler "Unused" service-control-handler-addr))
+    
+    (without-interrupts 
+     (setf service-status-handle (RegisterServiceCtrlHandler "Unused" service-control-handler-addr))
+     (setf err (GetLastError)))
     (if* (= service-status-handle 0)
        then
-	    (debug-msg (format nil "RegisterServiceCtrlHandler failed w/ error code ~D" (GetLastError)))
+	    (debug-msg (format nil "RegisterServiceCtrlHandler failed w/ error code ~D" err))
 	    (return-from ServiceMain))
 
     (setf (ss-slot 'dwServiceType) (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
@@ -260,11 +263,15 @@
     ))
 
 (defun set-service-status ()
-  (if* (= 0 (SetServiceStatus service-status-handle service-status))
-     then
-	  (debug-msg (format nil "SetServiceStatus failed w/ error code ~D" (GetLastError)))
-	  (big-exit)))
-
+  (let (res err)
+    (without-interrupts
+      (setf res (SetServiceStatus service-status-handle service-status))
+      (setf err (GetLastError)))
+    (if* (= 0 res)
+       then
+	    (debug-msg (format nil "SetServiceStatus failed w/ error code ~D" err))
+	    (big-exit))))
+  
 (defun big-exit ()
   (exit 0 :no-unwind t :quiet t))
   
@@ -295,7 +302,8 @@
   (let* ((ServiceMainAddr (register-foreign-callable 'ServiceMain))
 	 (service-name (string-to-native "Unused"))
 	 (service-table-type '(:array SERVICE_TABLE_ENTRY 2))
-	 (service-table (allocate-fobject service-table-type :c)))
+	 (service-table (allocate-fobject service-table-type :c))
+	 err)
     (macrolet ((st-slot (index slot) `(fslot-value-typed service-table-type :c service-table ,index ,slot)))
 
       (mp:start-customs) ;; rfr recommendation.
@@ -309,8 +317,10 @@
       (setf (st-slot 1 'lpServiceName) 0)
       (setf (st-slot 1 'lpServiceProc) 0)
 
-      (if (= 0 (StartServiceCtrlDispatcher service-table))
-	  (debug-msg (format nil "StartServiceCtrlDispatcher got error code ~D~%" (GetLastError))))
+      (if* (= 0 (StartServiceCtrlDispatcher service-table))
+	 then
+	      (setf err (GetLastError))
+	      (debug-msg (format nil "StartServiceCtrlDispatcher got error code ~D~%" err)))
       
       ;; some cleanup
       (aclfree service-name)
@@ -334,10 +344,11 @@
       (setf machine 0))
   (if (null database)
       (setf database 0))
-  (let ((res (OpenSCManager machine database desired-access)))
-    (if (= res 0)
-	(error "OpenSCManager error ~D" (GetLastError))
-      res)))
+  (without-interrupts
+    (let ((res (OpenSCManager machine database desired-access)))
+      (if (= res 0)
+	  (error "OpenSCManager error ~D" (GetLastError))
+	res))))
 
 (defun close-sc-manager (handle)
   (CloseServiceHandle handle))
@@ -371,12 +382,15 @@
 	  (resume-handle (allocate-fobject :int :c))
 	  (buf 0)
 	  (bufsize 0)
-	  (errcode ERROR_MORE_DATA))
+	  (errcode ERROR_MORE_DATA)
+	  res)
       (while (= errcode ERROR_MORE_DATA)
 	     (setf (fslot-value-typed :int :c resume-handle) 0)
-	     (if (= 0 (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
+	     (without-interrupts
+	       (setf res (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
+	       (setf errcode (GetLastError)))
+	     (if (= 0 res)
 		 (progn
-		   (setf errcode (GetLastError))
 		   (if (not (= errcode ERROR_MORE_DATA))
 		       (error "EnumServicesStatus error code ~D" errcode))
 		   (setf bufsize (fslot-value-typed :int :c bytes-needed))
@@ -396,23 +410,26 @@
 
 (defun create-service (name displaystring cmdline)
   (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
-    (let ((res (CreateService 
-		schandle 
-		name
-		displaystring
-		STANDARD_RIGHTS_REQUIRED 
-		(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
-		SERVICE_DEMAND_START
-		SERVICE_ERROR_NORMAL
-		cmdline
-		0 ;; no load order group
-		0 ;; no tag identifier
-		0 ;; no dependencies 
-		0 ;; use LocalSystem account
-		0))) ;; no password
+    (let (res err)
+      (without-interrupts
+	(setf res (CreateService 
+		   schandle 
+		   name
+		   displaystring
+		   STANDARD_RIGHTS_REQUIRED 
+		   (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
+		   SERVICE_DEMAND_START
+		   SERVICE_ERROR_NORMAL
+		   cmdline
+		   0 ;; no load order group
+		   0 ;; no tag identifier
+		   0 ;; no dependencies 
+		   0 ;; use LocalSystem account
+		   0)) ;; no password
+	(setf err (GetLastError)))
       (if (= res 0)
-	  (error "CreateService error code ~D" (GetLastError))
-	(CloseServiceHandle res)))))
+	  (error "CreateService error code ~D" err))
+      (CloseServiceHandle res))))
 
 
 (defun delete-service (name)

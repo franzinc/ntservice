@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.1 2001/11/27 18:53:21 dancy Exp $
+;; $Id: testapp.cl,v 1.2 2002/09/19 20:21:32 dancy Exp $
 
 (in-package :user)
 
@@ -31,7 +31,7 @@
 (defparameter *servicename* "MyService")
 (defparameter *displayname* "My Common Lisp Service")
 (defparameter *commandline* 
-    "c:\\devel\\ntservice\\testapp\\testapp.exe arg1 arg2 arg3")
+    "c:\\devel\\nfs\\ntservice\\testapp\\testapp.exe arg1 arg2 arg3")
 
 ;; 2) Save 
 ;; 3) Load this file into Allegro CL and evaluate (build)

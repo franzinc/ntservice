@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.2 2001/08/15 23:40:34 dancy Exp $
+;; $Id: ntservice.cl,v 1.3 2001/11/27 18:25:10 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -34,6 +34,7 @@
 ;; foreign types
 
 (eval-when (compile load eval)
+  (require :foreign)
 
 (def-foreign-type SERVICE_TABLE_ENTRY 
     (:struct
@@ -96,6 +97,10 @@
 
 (def-foreign-call (CreateService "CreateServiceA") () 
   :returning :int 
+  :strings-convert t)
+
+(def-foreign-call (StartService "StartServiceA") ()
+  :returning :int
   :strings-convert t)
 
 (def-foreign-call DeleteService () :returning :int :strings-convert t)
@@ -302,7 +307,7 @@
       
       ;; The following is necessary to avoid a complaint about not being
       ;; able to kill a foreign thread.
-      (exit 0 :no-unwind t :quiet t))))
+      (big-exit))))
 
 ;;;;;;;;;;
 
@@ -326,68 +331,86 @@
 (defun close-sc-manager (handle)
   (CloseServiceHandle handle))
 
+(defmacro with-sc-manager ((handle machine database desired-access) &body body)
+  `(let ((,handle (open-sc-manager ,machine ,database ,desired-access)))
+     (unwind-protect 
+	 (progn ,@body)
+       (close-sc-manager ,handle))))
+
+(defun open-service (smhandle name desired-access)
+  (let (shandle err)
+    (without-interrupts
+      (setf shandle (OpenService smhandle name desired-access))
+      (setf err (GetLastError)))
+    (if (= 0 shandle)
+	(error "OpenService failed w/ error code ~D" err))
+    shandle))
+
+(defmacro with-open-service ((handle smhandle name desired-access) &body body)
+  `(let ((,handle (open-service ,smhandle ,name ,desired-access)))
+     (unwind-protect
+	 (progn ,@body)
+       (CloseServiceHandle ,handle))))
+
 ;;; just a test function.
 (defun enum-services ()
-  (let ((schandle (open-sc-manager nil nil SC_MANAGER_ALL_ACCESS))
-	(bytes-needed (allocate-fobject :int :c))
-	(services-returned (allocate-fobject :int :c))
-	(resume-handle (allocate-fobject :int :c))
-	(buf 0)
-	(bufsize 0)
-	(errcode ERROR_MORE_DATA))
-    (while (= errcode ERROR_MORE_DATA)
-	   (setf (fslot-value-typed :int :c resume-handle) 0)
-	   (if (= 0 (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
-	       (progn
-		 (setf errcode (GetLastError))
-		 (if (not (= errcode ERROR_MORE_DATA))
-		     (error "EnumServicesStatus error code ~D" errcode))
-		 (setf bufsize (fslot-value-typed :int :c bytes-needed))
-		 (setf buf (aclmalloc bufsize)))
-	     (setf errcode 0)))
-    
-    (let ((count (fslot-value-typed :int :c services-returned)))
-      (dotimes (i count)
-	(format t "~A -> ~A~%" 
-		(native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpServiceName)) 
-		(native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpDisplayName)))))
-
-    (aclfree buf)
-    (free-fobject bytes-needed)
-    (free-fobject services-returned)
-    (free-fobject resume-handle)
-    (close-sc-manager schandle)))
+  (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
+    (let ((bytes-needed (allocate-fobject :int :c))
+	  (services-returned (allocate-fobject :int :c))
+	  (resume-handle (allocate-fobject :int :c))
+	  (buf 0)
+	  (bufsize 0)
+	  (errcode ERROR_MORE_DATA))
+      (while (= errcode ERROR_MORE_DATA)
+	     (setf (fslot-value-typed :int :c resume-handle) 0)
+	     (if (= 0 (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
+		 (progn
+		   (setf errcode (GetLastError))
+		   (if (not (= errcode ERROR_MORE_DATA))
+		       (error "EnumServicesStatus error code ~D" errcode))
+		   (setf bufsize (fslot-value-typed :int :c bytes-needed))
+		   (setf buf (aclmalloc bufsize)))
+	       (setf errcode 0)))
+      
+      (let ((count (fslot-value-typed :int :c services-returned)))
+	(dotimes (i count)
+	  (format t "~A -> ~A~%" 
+		  (native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpServiceName)) 
+		  (native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpDisplayName)))))
+      
+      (aclfree buf)
+      (free-fobject bytes-needed)
+      (free-fobject services-returned)
+      (free-fobject resume-handle))))
 
 (defun create-service (name displaystring cmdline)
-  (let* ((schandle (open-sc-manager nil nil SC_MANAGER_ALL_ACCESS))
-	 (res (CreateService 
-	       schandle 
-	       name
-	       displaystring
-	       STANDARD_RIGHTS_REQUIRED 
-	       (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
-	       SERVICE_DEMAND_START
-	       SERVICE_ERROR_NORMAL
-	       cmdline
-	       0 ;; no load order group
-	       0 
-	       0 ;; no dependencies 
-	       0 ;; use LocalSystem account
-	       0))) ;; no password
-    (if (= res 0)
-	(error "CreateService error code ~D" (GetLastError))
-      (CloseServiceHandle res))
-    (close-sc-manager schandle)))
+  (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
+    (let ((res (CreateService 
+		schandle 
+		name
+		displaystring
+		STANDARD_RIGHTS_REQUIRED 
+		(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
+		SERVICE_DEMAND_START
+		SERVICE_ERROR_NORMAL
+		cmdline
+		0 ;; no load order group
+		0 ;; no tag identifier
+		0 ;; no dependencies 
+		0 ;; use LocalSystem account
+		0))) ;; no password
+      (if (= res 0)
+	  (error "CreateService error code ~D" (GetLastError))
+	(CloseServiceHandle res)))))
+
 
 (defun delete-service (name)
-  (let* ((smhandle (open-sc-manager nil nil SC_MANAGER_ALL_ACCESS))
-	 (schandle (OpenService smhandle name STANDARD_RIGHTS_REQUIRED)))
-    (when (= schandle 0)
-      (error "OpenService failed w/ error code ~D" (GetLastError)))
-    (when (= (DeleteService schandle) 0)
-      (error "DeleteService failed w/ error code ~D" (GetLastError)))
-    (CloseServiceHandle schandle)
-    (close-sc-manager smhandle)))
-    
+  (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
+    (with-open-service (handle sc name STANDARD_RIGHTS_REQUIRED)
+      (without-interrupts 
+	(if (= 0 (DeleteService handle))
+	    (error "DeleteService failed w/ error code ~D" (GetLastError)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+

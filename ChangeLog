@@ -1,3 +1,7 @@
+2001-08-15  Kevin Layer  <layer@crikey>
+
+	* ntservice.html: fix readme reference
+
 2001-08-10  Ahmon Dancy  <dancy@dancy>
 
 	* service.cl: Renamed to ntservice.cl to match the name of the

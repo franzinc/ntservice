@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.4 2003/12/12 23:53:11 dancy Exp $
+;; $Id: testapp.cl,v 1.5 2004/09/16 17:40:17 dancy Exp $
 
 (in-package :user)
 
@@ -61,7 +61,8 @@
 	(progn
 	  (remove-service)
 	  (return-from main)))
-    (ntservice:execute-service 'real-main :init 'init)
+    (ntservice:execute-service 'real-main :init 'init
+			       :stop 'stop-function)
     t))
 
 (defun init (args) 
@@ -73,9 +74,13 @@
     (format t "sleeping...~%")
     (sleep 5)))
 
+(defun stop-function ()
+  (format t "Closing down service.~%"))
+
 (defun build ()
   (compile-file-if-needed "testapp.cl")
-  (generate-executable "testapp" '("testapp.fasl" "ntservice.fasl")))
+  (generate-executable "testapp" '("testapp.fasl" "ntservice.fasl"
+				   #+(version>= 7):proc2common)))
 
 (defun add-service (exepath)
   (format t "Installing service...~%")

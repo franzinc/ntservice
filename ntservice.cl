@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.11 2004/02/03 20:58:13 dancy Exp $
+;; $Id: ntservice.cl,v 1.12 2004/02/13 17:53:22 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -352,7 +352,7 @@
 "))))
 
 (defun execute-service (main &key init stop)
-
+  
   (setf service-main-func main)
   (setf service-init-func init)
   (setf service-stop-func stop)
@@ -363,10 +363,11 @@
 	 (service-table (allocate-fobject service-table-type :c)))
     (macrolet ((st-slot (index slot) `(fslot-value-typed service-table-type :c service-table ,index ,slot)))
 
+      (mp:start-scheduler)
       #-(version>= 7)(mp:start-customs) ;; rfr recommendation.
 
       (start_tray_icon_watcher) ; ensure that tray icon is visible after login
-      
+
       (setf (st-slot 0 'lpServiceName) service-name)  ;; unused
       (setf (st-slot 0 'lpServiceProc) ServiceMainAddr)
       ;; the null terminating entry

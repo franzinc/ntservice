@@ -1,3 +1,10 @@
+2004-02-13    <dancy@CANDY2K>
+
+	* ntservice.cl (execute-service): Add call to mp:start-scheduler
+	before calling StartServiceCtrlManager.  Required for 7.0 since
+	mp:start-customs (which used to start the scheduler) isn't used
+	anymore.
+
 2003-12-12    <dancy@CANDY2K>
 
 	* ntservice.cl *** Incompatible change made ***

@@ -1,3 +1,11 @@
+2001-11-27    <dancy@CANDY2K>
+
+	* readme.txt:  Hopefully clarified proper use of this package.
+
+	* testapp.cl:  Example application.
+
+	* ntservice.cl:  Added a coupla macros.  No important changes.
+
 2001-08-15    <layer@HOBART>
 
 	* ntservice.html: update doc

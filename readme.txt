@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.3 2001/11/27 18:04:56 dancy Exp $
+$Id: readme.txt,v 1.4 2001/11/27 18:53:21 dancy Exp $
 
 Turn your Common Lisp application into a Windows NT/2000 service with
 the ntservice package.
@@ -21,11 +21,11 @@ Follow these steps and you'll be on the road to servicedom.
    ntservice:start-service as soon as possible.
    ntservice:start-service will be responsible for executing any
    initialization functions which your program may need.  It is also
-   responsible for starting the main loop of your program.   Please be
-   sure to note that ntservice:start-service calls 
-   (exit 0 :no-unwind t :quiet t) when the service has stopped.  If
-   you need things to happen before 'exit' is called, use the 'stop'
-   keyword argument to start-service.  
+   responsible for starting the main loop of your program.  Please
+   note: ntservice:start-service calls (exit 0 :no-unwind t :quiet t)
+   when the service is stopped.  If you need things to happen before
+   'exit' is called, use the 'stop' keyword argument to start-service
+   to pass in a function that can do cleanup.
    
    The definition for ntservice:start-service is as follows:
 
@@ -43,10 +43,12 @@ The keyword arguments 'init' and 'stop' are optional.
 should be executed before the main loop is executed.  Such a function
 might load in configuration settings or verify the system environment.
 The 'init' function should be prepared to accept a single argument.
-This argument is the list of service command line arguments (see step
-#5 below).  If the 'init' function returns 'nil', the service will not
-be started and an error will be logged and/or reported.  Make sure
-'init' returns non-nil under normal circumstances.
+This argument is the list of "Start parameters" that have been
+specified for the service.  This list is usually empty but can be
+modified using the Services control panel applet.  If the 'init'
+function returns 'nil', the service will not be started and an error
+will be logged and/or reported.  Make sure 'init' returns non-nil
+under normal circumstances.
 
 'stop' specifies a function (or a symbol naming a function) that
 should be executed when the service is to be stopped.  Such a function
@@ -55,14 +57,18 @@ This function should do its job fairly swiftly, otherwise Windows
 might complain that the service isn't stopping properly.  No arguments
 are passed to this function.
 
-Please remember that start-service never returns to its caller.  It
-calls (exit 0 :no-unwind t :quiet t) to exit Lisp.
+Please remember that ntservice:start-service never returns to its
+caller.  It calls (exit 0 :no-unwind t :quiet t) to exit Lisp.
 
 4) Regenerate your application w/ the updated code.
 
 5) Call ntservice:create-service to add your program to the list of
-Windows services.  The definition for ntservice:create-service is as
-follows:
+Windows services.  Usually this would be done by the program that
+installs your application.  See testapp.cl for an example of how to
+add command-line switches to your program to allow a user to
+add/remove the service easily.
+
+The definition for ntservice:create-service is as follows:
 
 (defun create-service (name displaystring cmdline)
   ...)
@@ -125,3 +131,5 @@ You can use the Services control panel applet to change who the
 service runs as.  Note that no account but LocalSystem will be able to
 interact w/ the desktop (i.e., your program's window will be invisible
 if you don't run as LocalSystem).
+
+See testapp.cl for an example skeleton for a service application.  

@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.10 2003/12/12 23:53:11 dancy Exp $
+;; $Id: ntservice.cl,v 1.11 2004/02/03 20:58:13 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -303,12 +303,9 @@
     (setf (ss-slot 'dwControlsAccepted) SERVICE_ACCEPT_STOP)
     (setf (ss-slot 'dwWin32ExitCode) NO_ERROR)
     (setf (ss-slot 'dwCheckPoint) 0)
-    (setf (ss-slot 'dwWaitHint) 0)
+    (setf (ss-slot 'dwWaitHint) 10000) ;; 10 seconds
     
     (when service-init-func
-      (setf (ss-slot 'dwCurrentState) SERVICE_START_PENDING)
-      (set-service-status)
-	    
       (when (null (funcall service-init-func args))
 	(setf (ss-slot 'dwWin32ExitCode) ERROR_SERVICE_SPECIFIC_ERROR)
 	(setf (ss-slot 'dwServiceSpecificExitCode) 1)
@@ -316,6 +313,8 @@
 	(return-from ServiceMain)))
     
     (setf (ss-slot 'dwCurrentState) SERVICE_RUNNING)
+    (setf (ss-slot 'dwCheckPoint) 0)
+    (setf (ss-slot 'dwWaitHint) 0)
     (set-service-status)
     
     (funcall service-main-func)
@@ -364,10 +363,9 @@
 	 (service-table (allocate-fobject service-table-type :c)))
     (macrolet ((st-slot (index slot) `(fslot-value-typed service-table-type :c service-table ,index ,slot)))
 
-      (mp:start-customs) ;; rfr recommendation.
+      #-(version>= 7)(mp:start-customs) ;; rfr recommendation.
 
-      #+(version>= 6 2 :pre-beta 13)
-      (start_tray_icon_watcher) ; ensure that tray icon visible after login
+      (start_tray_icon_watcher) ; ensure that tray icon is visible after login
       
       (setf (st-slot 0 'lpServiceName) service-name)  ;; unused
       (setf (st-slot 0 'lpServiceProc) ServiceMainAddr)
@@ -506,12 +504,56 @@
 	 else
 	      (values nil err "OpenService")))))
 
-(defmacro with-service-status ((var) &body body)
+(defmacro with-service-status ((handle var) &body body)
   `(let ((,var (allocate-fobject 'SERVICE_STATUS :c)))
      (unwind-protect
-	 (progn ,@body)
+	 (progn 
+	   (query-service-status ,handle ,var)
+	   ,@body)
        (free-fobject ,var))))
 
+
+(defun query-service-status (handle ss)
+  (multiple-value-bind (res err) (QueryServiceStatus handle ss)
+    (if (zerop res)
+	(error "QueryServiceStatus: ~A" (winstrerror err)))))
+
+(defmacro get-service-state (ss)
+  `(fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwCurrentState))
+
+(defmacro service-status-eq (ss status)
+  `(= (get-service-state ,ss) ,status))
+
+(defmacro service-running-p (ss)
+  `(service-status-eq ,ss SERVICE_RUNNING))
+
+(defmacro service-start-pending-p (ss)
+  `(service-status-eq ,ss SERVICE_START_PENDING))
+
+(defmacro service-stopped-p (ss)
+  `(service-status-eq ,ss SERVICE_STOPPED))
+
+(defmacro service-stop-pending-p (ss)
+  `(service-status-eq ,ss SERVICE_STOP_PENDING))
+
+(defmacro get-service-wait-hint-in-seconds (ss)
+  `(/ (fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwWaitHint) 1000.0))
+
+(defmacro sleep-wait-hint-time (ss)
+  `(sleep (get-service-wait-hint-in-seconds ,ss)))
+
+(defmacro get-service-checkpoint (ss)
+  `(fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwCheckPoint))
+
+(defun wait-for-service-to-stop (handle ss timeout)
+  (let ((give-up-at (+ timeout (get-universal-time))))
+    (while (not (service-stopped-p ss))
+      (if (>= (get-universal-time) give-up-at)
+	  (return-from wait-for-service-to-stop
+	    (values nil :timeout)))
+      (sleep-wait-hint-time ss)
+      (query-service-status handle ss))
+    t))
 
 (defun start-service (name &key (wait t))
   (block nil
@@ -535,109 +577,63 @@
 	      t
 	    (values nil err)))))))
 
-
 (defun stop-service (name &key (timeout 30))
   (block nil
     (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
       (with-open-service (handle err sc name SERVICE_ALL_ACCESS)
 	(if (null handle)
 	    (return (values nil err "OpenService")))
-	(if (service-stopped-p handle)
-	    (return t))
-	(if (service-stop-pending-p handle)
-	    (return (wait-for-service-to-stop handle timeout)))
-	
-	;; XXXX -- need option to stop dependencies.
-	
-	(with-service-status (ss)
+	(with-service-status (handle ss)
+	  (if (service-stopped-p ss)
+	      (return t))
+	  (if (service-stop-pending-p ss)
+	      (return (wait-for-service-to-stop handle ss timeout)))
+	  
+	  ;; XXXX -- need option to stop dependencies.
+	  
 	  (multiple-value-bind (res err)
 	      (ControlService handle SERVICE_CONTROL_STOP ss)
 	    (if (zerop res)
-		(return (values nil err "ControlService")))))
-	
-	(wait-for-service-to-stop handle timeout)))))
+		(return (values nil err "ControlService"))))
+	  
+	  (wait-for-service-to-stop handle ss timeout))))))
 
 
 
-(defun get-service-status-slot (handle slotname)
-  (with-service-status (ss)
-    (macrolet ((ss-slot (slot) 
-		 `(fslot-value-typed 'SERVICE_STATUS :c ss ,slot)))
-      (multiple-value-bind (res err) (QueryServiceStatus handle ss)
-	(if (zerop res)
-	    (error "QueryServiceStatus: ~A" (winstrerror err))))
-      (ss-slot slotname))))
-
-(defun get-service-state (handle)
-  (get-service-status-slot handle 'dwCurrentState))
-  
-(defun service-status-eq (handle status)
-  (= (get-service-state handle) status))
-
-(defun service-running-p (handle)
-  (service-status-eq handle SERVICE_RUNNING))
-
-(defun service-start-pending-p (handle)
-  (service-status-eq handle SERVICE_START_PENDING))
-
-(defun service-stopped-p (handle)
-  (service-status-eq handle SERVICE_STOPPED))
-
-(defun service-stop-pending-p (handle)
-  (service-status-eq handle SERVICE_STOP_PENDING))
-
-(defun get-service-wait-hint (handle)
-  (get-service-status-slot handle 'dwWaitHint))
-
-(defun sleep-wait-hint-time (handle)
-  (sleep (/ (get-service-wait-hint handle) 1000.0)))
-
-(defun get-service-checkpoint (handle)
-  (get-service-status-slot handle 'dwCheckPoint))
-
-(defun wait-for-service-to-stop (handle timeout)
-  (let ((give-up-at (+ timeout (get-universal-time))))
-    (while (service-stop-pending-p handle)
-      (if (>= (get-universal-time) give-up-at)
-	  (return-from wait-for-service-to-stop
-	    (values nil :timeout)))
-      (sleep-wait-hint-time handle))
-    ;; service is not in pending state.  It'd better be stopped now
-    (if (service-stopped-p handle)
-	t
-      (error "wait-for-service-to-stop: Unexpected service state: ~A" 
-	     (get-service-state handle)))))
-      
-
-;; Similar to example in MSDN.
 (defun wait-for-service-to-start (handle)
-  (let ((start-tick-count (* (get-universal-time) 1000))
-	(old-checkpoint (get-service-checkpoint handle)))
-    (while (service-start-pending-p handle)
-      ;; convert to milliseconds.. and compute one tenth
-      (let ((wait-time  (/ (get-service-wait-hint handle) 10000.0)))
-	(if (< wait-time 1)
-	    (setf wait-time 1))
-	(if (> wait-time 10)
-	    (setf wait-time 10))
-	(sleep wait-time))
-      
-      ;; check again
-      (when (service-start-pending-p handle)
-	(if* (> (get-service-checkpoint handle) old-checkpoint)
-	   then 
-		;; progress is being made
-		(setf old-checkpoint (get-service-checkpoint handle))
-	   else
-		(if (> (- (* (get-universal-time) 1000) start-tick-count)
-		       (get-service-wait-hint handle))
-		    (return-from wait-for-service-to-start 
-		      (values nil :timeout))))))
+  (with-service-status (handle ss)
+    (let ((start-tick-count (get-universal-time))
+	  (old-checkpoint (get-service-checkpoint ss)))
+      (while (service-start-pending-p ss)
+	(let ((wait-time  (/ (get-service-wait-hint-in-seconds ss) 10.0)))
+	  (if (< wait-time 1)
+	      (setf wait-time 1))
+	  (if (> wait-time 10)
+	      (setf wait-time 10))
+	  (sleep wait-time))
+	
+	;; check again
+	(query-service-status handle ss)
+	(if (not (service-start-pending-p ss))
+	    (return))
 
-    (if (service-running-p handle)
-	t
-      (error "wait-for-service-to-start: Unexpected service state: ~A"
-	     (get-service-state handle)))))
+	(if* (> (get-service-checkpoint ss) old-checkpoint)
+	   then 
+		;; progress is being made.
+		(setf old-checkpoint (get-service-checkpoint ss))
+		(setf start-tick-count (get-universal-time))
+	   else
+		;; no progress has been made.. see if we have exceeded
+		;; the wait time.
+		(if (> (- (get-universal-time) start-tick-count)
+		       (get-service-wait-hint-in-seconds ss))
+		    (return-from wait-for-service-to-start 
+		      (values nil :timeout)))))
+      
+      (if (service-running-p ss)
+	  t
+	(error "wait-for-service-to-start: Unexpected service state: ~A"
+	       (get-service-state ss))))))
 
 
   
@@ -645,6 +641,8 @@
 ;;; Error message stuff
 
 (defun winstrerror (code)
+  (if (not (numberp code))
+      (error "Argument to winsterror should be a number, not ~S" code))
   (let ((stringptr (ff:allocate-fobject '(* :char) :foreign-static-gc))
 	res)
     (FormatMessage

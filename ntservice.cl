@@ -1,4 +1,4 @@
-;; $Id: service.cl,v 1.1.1.1 2001/08/10 20:12:02 layer Exp $
+;; $Id: ntservice.cl,v 1.1 2001/08/10 20:21:44 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -334,8 +334,6 @@
     (free-fobject services-returned)
     (free-fobject resume-handle)
     (close-sc-manager schandle)))
-
-;;; these need to be generalized so that people can use them.
 
 (defun create-service (name displaystring cmdline)
   (let* ((schandle (open-sc-manager nil nil SC_MANAGER_ALL_ACCESS))

@@ -1,3 +1,10 @@
+2001-08-10  Ahmon Dancy  <dancy@dancy>
+
+	* service.cl: Renamed to ntservice.cl to match the name of the
+	module and the package.
+
+	* ntservice.cl:  Removes some comments that no longer apply.
+
 2001-08-10  Kevin Layer  <layer@crikey>
 
 	* new module

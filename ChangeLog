@@ -1,3 +1,19 @@
+2003-12-12    <dancy@CANDY2K>
+
+	* ntservice.cl *** Incompatible change made ***
+	The function formerly known as start-service is now called
+	execute-service.  There is a new function call start-service which
+	starts a service (as if the user started it from the Services
+	control panel).  There is also a stop-service function now. 
+
+	Changed a bunch of defparameters to defconstants.  Not sure why I
+	didn't do that from the start.
+
+	* readme.txt:  Updated to reflect changes and new exported
+	functions.
+
+	* testapp.cl:  Changed call of start-service to execute-service.
+
 2003-01-22    <dancy@DANCYSOFT>
 
 	* ntservice.cl (create-service): Added keyword argument :start to

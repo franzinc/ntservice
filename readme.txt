@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.7 2003/01/23 00:07:57 dancy Exp $
+$Id: readme.txt,v 1.8 2003/12/12 23:53:11 dancy Exp $
 
 Turn your Common Lisp application into a Windows NT/2000 service with
 the ntservice package.
@@ -18,18 +18,19 @@ Follow these steps and you'll be on the road to servicedom.
    loads ntservice.fasl.
 
 3) The main function in your application should call
-   ntservice:start-service as soon as possible.
-   ntservice:start-service will be responsible for executing any
-   initialization functions which your program may need.  It is also
-   responsible for starting the main loop of your program.  Please
-   note: ntservice:start-service calls (exit 0 :no-unwind t :quiet t)
-   when the service is stopped.  If you need things to happen before
-   'exit' is called, use the 'stop' keyword argument to start-service
-   to pass in a function that can do cleanup.
+   ntservice:execute-service as soon as possible.  [This used to be
+   called 'start-service'.. but that name turned out to be a bad
+   choice].  ntservice:execute-service will be responsible for
+   executing any initialization functions which your program may need.
+   It is also responsible for starting the main loop of your program.
+   Please note: ntservice:start-service calls (exit 0 :no-unwind t
+   :quiet t) when the service is stopped.  If you need things to
+   happen before 'exit' is called, use the 'stop' keyword argument to
+   execute-service to pass in a function that can do cleanup.
    
-   The definition for ntservice:start-service is as follows:
+   The definition for ntservice:execute-service is as follows:
 
-(defun start-service (main &key init stop)
+(defun execute-service (main &key init stop)
   ...)
 
 'main' should be a function (or a symbol naming a function) which
@@ -58,7 +59,7 @@ This function should do its job fairly swiftly, otherwise Windows
 might complain that the service isn't stopping properly.  No arguments
 are passed to this function.
 
-Please remember that ntservice:start-service never returns to its
+Please remember that ntservice:execute-service never returns to its
 caller.  It calls (exit 0 :no-unwind t :quiet t) to exit Lisp.
 
 4) Regenerate your application w/ the updated code.
@@ -151,3 +152,20 @@ interact w/ the desktop (i.e., your program's window will be invisible
 if you don't run as LocalSystem).
 
 See testapp.cl for an example skeleton for a service application.  
+
+To start and stop services programatically, you can use the
+ntservice:start-service and ntservice:stop-service functions.
+
+ntservice:start-service (name &key wait)
+
+'name' is the name of the service.  If 'wait' is true (default), then
+it the function will wait until it has confirmation that the service
+has started.  
+
+ntservice:stop-service (name &key (timeout 30))
+
+'name' is the name of the service.  'timeout' is the number of seconds
+to wait for the service to stop.  Currently, this function does not
+automatically stop dependent services.
+
+

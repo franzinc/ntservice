@@ -21,7 +21,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.3 2003/01/20 22:41:35 dancy Exp $
+;; $Id: testapp.cl,v 1.4 2003/12/12 23:53:11 dancy Exp $
 
 (in-package :user)
 
@@ -61,7 +61,7 @@
 	(progn
 	  (remove-service)
 	  (return-from main)))
-    (ntservice:start-service 'real-main :init 'init)
+    (ntservice:execute-service 'real-main :init 'init)
     t))
 
 (defun init (args) 

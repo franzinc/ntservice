@@ -21,11 +21,13 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.9 2003/01/23 00:07:57 dancy Exp $
+;; $Id: ntservice.cl,v 1.10 2003/12/12 23:53:11 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
   (:export #:start-service
+	   #:stop-service
+	   #:execute-service ;; used to be start-service
 	   #:create-service
 	   #:delete-service
 	   #:winstrerror))
@@ -64,15 +66,19 @@
 (def-foreign-call (StartServiceCtrlDispatcher "StartServiceCtrlDispatcherA")
     ()
   :strings-convert t
+  :error-value :os-specific
   :returning :int
   :release-heap :always)
 
 (def-foreign-call (RegisterServiceCtrlHandler "RegisterServiceCtrlHandlerA") ()
-    :strings-convert t
-    :returning :int)
+  :strings-convert t
+  :error-value :os-specific
+  :returning :int)
 
 (def-foreign-call (SetServiceStatus "SetServiceStatus") () 
-  :returning :int :strings-convert t)
+  :returning :int 
+  :error-value :os-specific
+  :strings-convert t)
 
 (def-foreign-call (GetLastError "GetLastError") () 
   :returning :int :strings-convert t)
@@ -84,6 +90,7 @@
 
 (def-foreign-call (OpenSCManager "OpenSCManagerA") () 
   :strings-convert t
+  :error-value :os-specific
   :returning :int)
 
 (def-foreign-call (CloseServiceHandle "CloseServiceHandle") ((hSCObject :int)) 
@@ -97,6 +104,7 @@
 
 (def-foreign-call (EnumServicesStatus "EnumServicesStatusA") ((hSCManager :int) (dwServiceType :int) (dwServiceState :int) (lpServices (* ENUM_SERVICE_STATUS)) (cbBufSize :int) (pcbBytesNeeded (* :int)) (lpServicesReturned (* :int)) (lpResumeHandle (* :int)))
   :strings-convert t
+  :error-value :os-specific
   :returning :int)
 
 (def-foreign-call (CreateService "CreateServiceA") () 
@@ -106,10 +114,21 @@
 
 (def-foreign-call (StartService "StartServiceA") ()
   :returning :int
+  :error-value :os-specific
   :strings-convert t)
 
 (def-foreign-call (DeleteService "DeleteService") () 
   :returning :int 
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (QueryServiceStatus "QueryServiceStatus") ()
+  :returning :int
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (ControlService "ControlService") ()
+  :returning :int
   :error-value :os-specific
   :strings-convert t)
 
@@ -125,15 +144,16 @@
 
 ;;; constants
 
-(defparameter STANDARD_RIGHTS_REQUIRED #x000F0000)
-(defparameter SC_MANAGER_CONNECT             #x0001)
-(defparameter SC_MANAGER_CREATE_SERVICE      #x0002)
-(defparameter SC_MANAGER_ENUMERATE_SERVICE   #x0004)
-(defparameter SC_MANAGER_LOCK                #x0008)
-(defparameter SC_MANAGER_QUERY_LOCK_STATUS   #x0010)
-(defparameter SC_MANAGER_MODIFY_BOOT_CONFIG  #x0020)
+(defconstant STANDARD_RIGHTS_REQUIRED #x000F0000)
 
-(defparameter SC_MANAGER_ALL_ACCESS          
+(defconstant SC_MANAGER_CONNECT             #x0001)
+(defconstant SC_MANAGER_CREATE_SERVICE      #x0002)
+(defconstant SC_MANAGER_ENUMERATE_SERVICE   #x0004)
+(defconstant SC_MANAGER_LOCK                #x0008)
+(defconstant SC_MANAGER_QUERY_LOCK_STATUS   #x0010)
+(defconstant SC_MANAGER_MODIFY_BOOT_CONFIG  #x0020)
+
+(defconstant SC_MANAGER_ALL_ACCESS          
     (logior STANDARD_RIGHTS_REQUIRED  
 	    SC_MANAGER_CONNECT     
 	    SC_MANAGER_CREATE_SERVICE    
@@ -143,79 +163,105 @@
 	    SC_MANAGER_MODIFY_BOOT_CONFIG))
 
 
-(defparameter SERVICE_WIN32_OWN_PROCESS      #x00000010)
-(defparameter SERVICE_WIN32_SHARE_PROCESS    #x00000020)
-(defparameter SERVICE_WIN32
-    (logior SERVICE_WIN32_OWN_PROCESS SERVICE_WIN32_SHARE_PROCESS))
-(defparameter SERVICE_INTERACTIVE_PROCESS    #x00000100)
+(defconstant SERVICE_QUERY_CONFIG           #x0001)
+(defconstant SERVICE_CHANGE_CONFIG          #x0002)
+(defconstant SERVICE_QUERY_STATUS           #x0004)
+(defconstant SERVICE_ENUMERATE_DEPENDENTS   #x0008)
+(defconstant SERVICE_START                  #x0010)
+(defconstant SERVICE_STOP                   #x0020)
+(defconstant SERVICE_PAUSE_CONTINUE         #x0040)
+(defconstant SERVICE_INTERROGATE            #x0080)
+(defconstant SERVICE_USER_DEFINED_CONTROL   #x0100)
 
-(defparameter SERVICE_ACTIVE                 #x00000001)
-(defparameter SERVICE_INACTIVE               #x00000002)
-(defparameter SERVICE_STATE_ALL         
+(defconstant SERVICE_ALL_ACCESS 
+    (logior
+     STANDARD_RIGHTS_REQUIRED   
+     SERVICE_QUERY_CONFIG         
+     SERVICE_CHANGE_CONFIG        
+     SERVICE_QUERY_STATUS         
+     SERVICE_ENUMERATE_DEPENDENTS 
+     SERVICE_START                
+     SERVICE_STOP                 
+     SERVICE_PAUSE_CONTINUE       
+     SERVICE_INTERROGATE          
+     SERVICE_USER_DEFINED_CONTROL))
+
+
+
+
+(defconstant SERVICE_WIN32_OWN_PROCESS      #x00000010)
+(defconstant SERVICE_WIN32_SHARE_PROCESS    #x00000020)
+(defconstant SERVICE_WIN32
+    (logior SERVICE_WIN32_OWN_PROCESS SERVICE_WIN32_SHARE_PROCESS))
+(defconstant SERVICE_INTERACTIVE_PROCESS    #x00000100)
+
+(defconstant SERVICE_ACTIVE                 #x00000001)
+(defconstant SERVICE_INACTIVE               #x00000002)
+(defconstant SERVICE_STATE_ALL         
     (logior SERVICE_ACTIVE SERVICE_INACTIVE))
 
-(defparameter SERVICE_BOOT_START             #x00000000)
-(defparameter SERVICE_SYSTEM_START           #x00000001)
-(defparameter SERVICE_AUTO_START             #x00000002)
-(defparameter SERVICE_DEMAND_START           #x00000003)
-(defparameter SERVICE_DISABLED               #x00000004)
+(defconstant SERVICE_BOOT_START             #x00000000)
+(defconstant SERVICE_SYSTEM_START           #x00000001)
+(defconstant SERVICE_AUTO_START             #x00000002)
+(defconstant SERVICE_DEMAND_START           #x00000003)
+(defconstant SERVICE_DISABLED               #x00000004)
 
-(defparameter SERVICE_ERROR_IGNORE           #x00000000)
-(defparameter SERVICE_ERROR_NORMAL           #x00000001)
-(defparameter SERVICE_ERROR_SEVERE           #x00000002)
-(defparameter SERVICE_ERROR_CRITICAL         #x00000003)
+(defconstant SERVICE_ERROR_IGNORE           #x00000000)
+(defconstant SERVICE_ERROR_NORMAL           #x00000001)
+(defconstant SERVICE_ERROR_SEVERE           #x00000002)
+(defconstant SERVICE_ERROR_CRITICAL         #x00000003)
 
 
 ;;
 ;; Controls
 ;;
 (eval-when (compile load eval)
-(defparameter SERVICE_CONTROL_STOP           #x00000001)
-(defparameter SERVICE_CONTROL_PAUSE          #x00000002)
-(defparameter SERVICE_CONTROL_CONTINUE       #x00000003)
-(defparameter SERVICE_CONTROL_INTERROGATE    #x00000004)
-(defparameter SERVICE_CONTROL_SHUTDOWN       #x00000005)
-(defparameter SERVICE_CONTROL_PARAMCHANGE    #x00000006)
-(defparameter SERVICE_CONTROL_NETBINDADD     #x00000007)
-(defparameter SERVICE_CONTROL_NETBINDREMOVE  #x00000008)
-(defparameter SERVICE_CONTROL_NETBINDENABLE  #x00000009)
-(defparameter SERVICE_CONTROL_NETBINDDISABLE #x0000000A)
+(defconstant SERVICE_CONTROL_STOP           #x00000001)
+(defconstant SERVICE_CONTROL_PAUSE          #x00000002)
+(defconstant SERVICE_CONTROL_CONTINUE       #x00000003)
+(defconstant SERVICE_CONTROL_INTERROGATE    #x00000004)
+(defconstant SERVICE_CONTROL_SHUTDOWN       #x00000005)
+(defconstant SERVICE_CONTROL_PARAMCHANGE    #x00000006)
+(defconstant SERVICE_CONTROL_NETBINDADD     #x00000007)
+(defconstant SERVICE_CONTROL_NETBINDREMOVE  #x00000008)
+(defconstant SERVICE_CONTROL_NETBINDENABLE  #x00000009)
+(defconstant SERVICE_CONTROL_NETBINDDISABLE #x0000000A)
 )
 
 ;;
 ;; Service State -- for CurrentState
 ;;
-(defparameter SERVICE_STOPPED                #x00000001)
-(defparameter SERVICE_START_PENDING          #x00000002)
-(defparameter SERVICE_STOP_PENDING           #x00000003)
-(defparameter SERVICE_RUNNING                #x00000004)
-(defparameter SERVICE_CONTINUE_PENDING       #x00000005)
-(defparameter SERVICE_PAUSE_PENDING          #x00000006)
-(defparameter SERVICE_PAUSED                 #x00000007)
+(defconstant SERVICE_STOPPED                #x00000001)
+(defconstant SERVICE_START_PENDING          #x00000002)
+(defconstant SERVICE_STOP_PENDING           #x00000003)
+(defconstant SERVICE_RUNNING                #x00000004)
+(defconstant SERVICE_CONTINUE_PENDING       #x00000005)
+(defconstant SERVICE_PAUSE_PENDING          #x00000006)
+(defconstant SERVICE_PAUSED                 #x00000007)
 
 ;;
 ;; Controls Accepted  (Bit Mask)
 ;;
-(defparameter SERVICE_ACCEPT_STOP            #x00000001)
-(defparameter SERVICE_ACCEPT_PAUSE_CONTINUE  #x00000002)
-(defparameter SERVICE_ACCEPT_SHUTDOWN        #x00000004)
-(defparameter SERVICE_ACCEPT_PARAMCHANGE     #x00000008)
-(defparameter SERVICE_ACCEPT_NETBINDCHANGE   #x00000010)
+(defconstant SERVICE_ACCEPT_STOP            #x00000001)
+(defconstant SERVICE_ACCEPT_PAUSE_CONTINUE  #x00000002)
+(defconstant SERVICE_ACCEPT_SHUTDOWN        #x00000004)
+(defconstant SERVICE_ACCEPT_PARAMCHANGE     #x00000008)
+(defconstant SERVICE_ACCEPT_NETBINDCHANGE   #x00000010)
 
 ;;; error codes
 
-(defparameter NO_ERROR 0)
-(defparameter ERROR_MORE_DATA 234)
-(defparameter ERROR_SERVICE_SPECIFIC_ERROR 1066)
+(defconstant NO_ERROR 0)
+(defconstant ERROR_MORE_DATA 234)
+(defconstant ERROR_SERVICE_SPECIFIC_ERROR 1066)
 
 ;; FormatMessage stuff
-(defparameter FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
-(defparameter FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
-(defparameter FORMAT_MESSAGE_FROM_STRING     #x00000400)
-(defparameter FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
-(defparameter FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
-(defparameter FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
-(defparameter FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
+(defconstant FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
+(defconstant FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
+(defconstant FORMAT_MESSAGE_FROM_STRING     #x00000400)
+(defconstant FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
+(defconstant FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
+(defconstant FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
+(defconstant FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
 
 ;; globals
 
@@ -244,32 +290,30 @@
     (dotimes (i argc)
       (push (native-to-string (fslot-value-typed argv-type :c argv i)) args))
     (setf args (rest (reverse args))) ;; drop the service name from the list
-    
-    (without-interrupts 
-     (setf service-status-handle (RegisterServiceCtrlHandler "Unused" service-control-handler-addr))
-     (setf err (GetLastError)))
-    (if* (= service-status-handle 0)
-       then
-	    (debug-msg (format nil "RegisterServiceCtrlHandler failed w/ error code ~D" err))
-	    (return-from ServiceMain))
 
-    (setf (ss-slot 'dwServiceType) (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
+    (multiple-value-setq (service-status-handle err)
+      (RegisterServiceCtrlHandler "Unused" service-control-handler-addr))
+    (when (zerop service-status-handle)
+      (debug-msg (format nil "RegisterServiceCtrlHandler failed~A"
+			 (winstrerror err)))
+      (return-from ServiceMain))
+
+    (setf (ss-slot 'dwServiceType) 
+      (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
     (setf (ss-slot 'dwControlsAccepted) SERVICE_ACCEPT_STOP)
     (setf (ss-slot 'dwWin32ExitCode) NO_ERROR)
     (setf (ss-slot 'dwCheckPoint) 0)
     (setf (ss-slot 'dwWaitHint) 0)
     
-    (if* service-init-func
-       then
-	    (setf (ss-slot 'dwCurrentState) SERVICE_START_PENDING)
-	    (set-service-status)
+    (when service-init-func
+      (setf (ss-slot 'dwCurrentState) SERVICE_START_PENDING)
+      (set-service-status)
 	    
-	    (if* (null (funcall service-init-func args))
-	       then
-		    (setf (ss-slot 'dwWin32ExitCode) ERROR_SERVICE_SPECIFIC_ERROR)
-		    (setf (ss-slot 'dwServiceSpecificExitCode) 1)
-		    (set-service-status)
-		    (return-from ServiceMain)))
+      (when (null (funcall service-init-func args))
+	(setf (ss-slot 'dwWin32ExitCode) ERROR_SERVICE_SPECIFIC_ERROR)
+	(setf (ss-slot 'dwServiceSpecificExitCode) 1)
+	(set-service-status)
+	(return-from ServiceMain)))
     
     (setf (ss-slot 'dwCurrentState) SERVICE_RUNNING)
     (set-service-status)
@@ -277,34 +321,30 @@
     (funcall service-main-func)
 
     (setf (ss-slot 'dwCurrentState) SERVICE_STOPPED)
-    (set-service-status)
-    
-    ))
+    (set-service-status)))
 
 (defun set-service-status ()
-  (let (res err)
-    (without-interrupts
-      (setf res (SetServiceStatus service-status-handle service-status))
-      (setf err (GetLastError)))
-    (if* (= 0 res)
-       then
-	    (debug-msg (format nil "SetServiceStatus failed w/ error code ~D" err))
-	    (big-exit))))
+  (multiple-value-bind (res err)
+      (SetServiceStatus service-status-handle service-status)
+    (when (zerop res)
+      (debug-msg (format nil "SetServiceStatus failed: ~A" 
+			 (winstrerror err)))
+      (big-exit))))
   
 (defun big-exit ()
   (exit 0 :no-unwind t :quiet t))
   
 (defun-foreign-callable service-control-handler (fdwControl)
   (declare (:convention :stdcall))
-  (debug-msg (format nil "service-control-handler got control code ~D~%" fdwControl))
+  (debug-msg 
+   (format nil "service-control-handler got control code ~D~%" fdwControl))
   (case fdwControl
     (#.SERVICE_CONTROL_STOP
-     (if* service-stop-func
-	then
-	     (setf (ss-slot 'dwCurrentState) SERVICE_STOP_PENDING)
-	     (set-service-status)
+     (when service-stop-func
+       (setf (ss-slot 'dwCurrentState) SERVICE_STOP_PENDING)
+       (set-service-status)
 	     
-	     (funcall service-stop-func))
+       (funcall service-stop-func))
 
      (setf (ss-slot 'dwCurrentState) SERVICE_STOPPED)
      (set-service-status))
@@ -312,7 +352,7 @@
      (debug-msg "That control code is not handled.
 "))))
 
-(defun start-service (main &key init stop)
+(defun execute-service (main &key init stop)
 
   (setf service-main-func main)
   (setf service-init-func init)
@@ -321,8 +361,7 @@
   (let* ((ServiceMainAddr (register-foreign-callable 'ServiceMain))
 	 (service-name (string-to-native "Unused"))
 	 (service-table-type '(:array SERVICE_TABLE_ENTRY 2))
-	 (service-table (allocate-fobject service-table-type :c))
-	 err)
+	 (service-table (allocate-fobject service-table-type :c)))
     (macrolet ((st-slot (index slot) `(fslot-value-typed service-table-type :c service-table ,index ,slot)))
 
       (mp:start-customs) ;; rfr recommendation.
@@ -336,10 +375,12 @@
       (setf (st-slot 1 'lpServiceName) 0)
       (setf (st-slot 1 'lpServiceProc) 0)
 
-      (if* (= 0 (StartServiceCtrlDispatcher service-table))
-	 then
-	      (setf err (GetLastError))
-	      (debug-msg (format nil "StartServiceCtrlDispatcher got error code ~D~%" err)))
+      (multiple-value-bind (res err)
+	  (StartServiceCtrlDispatcher service-table)
+	(when (zerop res)
+	  (debug-msg 
+	   (format nil "StartServiceCtrlDispatcher failed:  ~D~%" 
+		   (winstrerror err)))))
       
       ;; some cleanup
       (aclfree service-name)
@@ -355,19 +396,17 @@
   (OutputDebugString msg))
 
 
-;;;;;;;;  Other stuff.  Not used for normal service operation.  Some of it
-;;;;;;;;  is just testing.   Some of it is code to install a service.
-
 (defun open-sc-manager (machine database desired-access)
   (if (null machine)
       (setf machine 0))
   (if (null database)
       (setf database 0))
-  (without-interrupts
-    (let ((res (OpenSCManager machine database desired-access)))
-      (if (= res 0)
-	  (error "OpenSCManager error ~D" (GetLastError))
-	res))))
+  (multiple-value-bind (res err)
+      (OpenSCManager machine database desired-access)
+    (if (zerop res)
+	(error "OpenSCManager failed: ~A" (winstrerror err))
+      res)))
+      
 
 (defun close-sc-manager (handle)
   (CloseServiceHandle handle))
@@ -402,17 +441,19 @@
 	  (errcode ERROR_MORE_DATA)
 	  res)
       (while (= errcode ERROR_MORE_DATA)
-	     (setf (fslot-value-typed :int :c resume-handle) 0)
-	     (without-interrupts
-	       (setf res (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
-	       (setf errcode (GetLastError)))
-	     (if (= 0 res)
-		 (progn
-		   (if (not (= errcode ERROR_MORE_DATA))
-		       (error "EnumServicesStatus error code ~D" errcode))
-		   (setf bufsize (fslot-value-typed :int :c bytes-needed))
-		   (setf buf (aclmalloc bufsize)))
-	       (setf errcode 0)))
+	(setf (fslot-value-typed :int :c resume-handle) 0)
+	
+	(multiple-value-setq (res errcode)
+	  (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
+	(if* (zerop res)
+	   then
+		(if (not (= errcode ERROR_MORE_DATA))
+		    (error "EnumServicesStatus error: ~A"
+			   (winstrerror errcode)))
+		(setf bufsize (fslot-value-typed :int :c bytes-needed))
+		(setf buf (aclmalloc bufsize))
+	   else
+		(setf errcode 0)))
       
       (let ((count (fslot-value-typed :int :c services-returned)))
 	(dotimes (i count)
@@ -447,7 +488,7 @@
 	 0) ;; no password
       (if (/= res 0)
 	  (CloseServiceHandle res))
-      (if (= res 0)
+      (if (zerop res)
 	  (values nil err)
 	(values t res)))))
 
@@ -464,6 +505,142 @@
 		  (values t res)))
 	 else
 	      (values nil err "OpenService")))))
+
+(defmacro with-service-status ((var) &body body)
+  `(let ((,var (allocate-fobject 'SERVICE_STATUS :c)))
+     (unwind-protect
+	 (progn ,@body)
+       (free-fobject ,var))))
+
+
+(defun start-service (name &key (wait t))
+  (block nil
+    (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
+      (with-open-service (handle err sc name SERVICE_ALL_ACCESS)
+	(if (null handle)
+	    (return (values nil err "OpenService")))
+	
+	(multiple-value-bind (res err)
+	    (StartService handle 0 0)
+	  (if (zerop res)
+	      (return (values nil err "StartService")))
+	  
+	  (if (not wait)
+	      (return t)))
+	      
+	;; need to wait.
+	(multiple-value-bind (success err)
+	    (wait-for-service-to-start handle)
+	  (if success
+	      t
+	    (values nil err)))))))
+
+
+(defun stop-service (name &key (timeout 30))
+  (block nil
+    (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
+      (with-open-service (handle err sc name SERVICE_ALL_ACCESS)
+	(if (null handle)
+	    (return (values nil err "OpenService")))
+	(if (service-stopped-p handle)
+	    (return t))
+	(if (service-stop-pending-p handle)
+	    (return (wait-for-service-to-stop handle timeout)))
+	
+	;; XXXX -- need option to stop dependencies.
+	
+	(with-service-status (ss)
+	  (multiple-value-bind (res err)
+	      (ControlService handle SERVICE_CONTROL_STOP ss)
+	    (if (zerop res)
+		(return (values nil err "ControlService")))))
+	
+	(wait-for-service-to-stop handle timeout)))))
+
+
+
+(defun get-service-status-slot (handle slotname)
+  (with-service-status (ss)
+    (macrolet ((ss-slot (slot) 
+		 `(fslot-value-typed 'SERVICE_STATUS :c ss ,slot)))
+      (multiple-value-bind (res err) (QueryServiceStatus handle ss)
+	(if (zerop res)
+	    (error "QueryServiceStatus: ~A" (winstrerror err))))
+      (ss-slot slotname))))
+
+(defun get-service-state (handle)
+  (get-service-status-slot handle 'dwCurrentState))
+  
+(defun service-status-eq (handle status)
+  (= (get-service-state handle) status))
+
+(defun service-running-p (handle)
+  (service-status-eq handle SERVICE_RUNNING))
+
+(defun service-start-pending-p (handle)
+  (service-status-eq handle SERVICE_START_PENDING))
+
+(defun service-stopped-p (handle)
+  (service-status-eq handle SERVICE_STOPPED))
+
+(defun service-stop-pending-p (handle)
+  (service-status-eq handle SERVICE_STOP_PENDING))
+
+(defun get-service-wait-hint (handle)
+  (get-service-status-slot handle 'dwWaitHint))
+
+(defun sleep-wait-hint-time (handle)
+  (sleep (/ (get-service-wait-hint handle) 1000.0)))
+
+(defun get-service-checkpoint (handle)
+  (get-service-status-slot handle 'dwCheckPoint))
+
+(defun wait-for-service-to-stop (handle timeout)
+  (let ((give-up-at (+ timeout (get-universal-time))))
+    (while (service-stop-pending-p handle)
+      (if (>= (get-universal-time) give-up-at)
+	  (return-from wait-for-service-to-stop
+	    (values nil :timeout)))
+      (sleep-wait-hint-time handle))
+    ;; service is not in pending state.  It'd better be stopped now
+    (if (service-stopped-p handle)
+	t
+      (error "wait-for-service-to-stop: Unexpected service state: ~A" 
+	     (get-service-state handle)))))
+      
+
+;; Similar to example in MSDN.
+(defun wait-for-service-to-start (handle)
+  (let ((start-tick-count (* (get-universal-time) 1000))
+	(old-checkpoint (get-service-checkpoint handle)))
+    (while (service-start-pending-p handle)
+      ;; convert to milliseconds.. and compute one tenth
+      (let ((wait-time  (/ (get-service-wait-hint handle) 10000.0)))
+	(if (< wait-time 1)
+	    (setf wait-time 1))
+	(if (> wait-time 10)
+	    (setf wait-time 10))
+	(sleep wait-time))
+      
+      ;; check again
+      (when (service-start-pending-p handle)
+	(if* (> (get-service-checkpoint handle) old-checkpoint)
+	   then 
+		;; progress is being made
+		(setf old-checkpoint (get-service-checkpoint handle))
+	   else
+		(if (> (- (* (get-universal-time) 1000) start-tick-count)
+		       (get-service-wait-hint handle))
+		    (return-from wait-for-service-to-start 
+		      (values nil :timeout))))))
+
+    (if (service-running-p handle)
+	t
+      (error "wait-for-service-to-start: Unexpected service state: ~A"
+	     (get-service-state handle)))))
+
+
+  
 
 ;;; Error message stuff
 

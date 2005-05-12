@@ -1,3 +1,8 @@
+2005-05-12  Kevin Layer  <layer@gemini>
+
+	* ntservice.cl: Changes from Petr Broz to make interrogation of
+	  the service more robust.
+
 2004-02-13    <dancy@CANDY2K>
 
 	* ntservice.cl (execute-service): Add call to mp:start-scheduler

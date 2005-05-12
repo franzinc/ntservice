@@ -1,6 +1,7 @@
 ;; -*- mode: common-lisp -*-
 ;;
 ;; Copyright (C) 2001 Franz Inc, Berkeley, CA.  All rights reserved.
+;; Copyright (C) 2001-2005 Franz Inc, Oakland, CA.  All rights reserved.
 ;;
 ;; This code is free software; you can redistribute it and/or
 ;; modify it under the terms of the version 2.1 of
@@ -21,7 +22,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.12 2004/02/13 17:53:22 dancy Exp $
+;; $Id: ntservice.cl,v 1.13 2005/05/12 17:01:48 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -78,7 +79,8 @@
 (def-foreign-call (SetServiceStatus "SetServiceStatus") () 
   :returning :int 
   :error-value :os-specific
-  :strings-convert t)
+  :strings-convert t
+  :release-heap :always)
 
 (def-foreign-call (GetLastError "GetLastError") () 
   :returning :int :strings-convert t)
@@ -130,7 +132,8 @@
 (def-foreign-call (ControlService "ControlService") ()
   :returning :int
   :error-value :os-specific
-  :strings-convert t)
+  :strings-convert t
+  :release-heap :always)
 
 (def-foreign-call (FormatMessage "FormatMessageA") ()
   :returning :int :strings-convert nil)
@@ -326,7 +329,7 @@
   (multiple-value-bind (res err)
       (SetServiceStatus service-status-handle service-status)
     (when (zerop res)
-      (debug-msg (format nil "SetServiceStatus failed: ~A" 
+      (debug-msg (format nil "SetServiceStatus failed: ~A"
 			 (winstrerror err)))
       (big-exit))))
   
@@ -347,9 +350,11 @@
 
      (setf (ss-slot 'dwCurrentState) SERVICE_STOPPED)
      (set-service-status))
+    (#.SERVICE_CONTROL_INTERROGATE
+     (set-service-status))
     (t
-     (debug-msg "That control code is not handled.
-"))))
+     (debug-msg (format nil "That control code is not handled.~%"))))
+  (values))
 
 (defun execute-service (main &key init stop)
   
@@ -378,7 +383,7 @@
 	  (StartServiceCtrlDispatcher service-table)
 	(when (zerop res)
 	  (debug-msg 
-	   (format nil "StartServiceCtrlDispatcher failed:  ~D~%" 
+	   (format nil "StartServiceCtrlDispatcher failed:  ~D~%"
 		   (winstrerror err)))))
       
       ;; some cleanup
@@ -661,5 +666,3 @@
     res))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-

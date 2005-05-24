@@ -27,7 +27,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.13.4.1 2005/05/24 16:19:21 layer Exp $
+;; $Id: ntservice.cl,v 1.13.4.2 2005/05/24 18:02:50 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -39,6 +39,8 @@
 	   #:winstrerror))
 
 (in-package :ntservice)
+
+(provide :ntservice)
 
 ;; foreign types
 

@@ -1,3 +1,7 @@
+2005-05-24    <layer@HOBART>
+
+	* ntservice.cl: add provide
+
 2005-05-12  Kevin Layer  <layer@gemini>
 
 	* ntservice.cl: Changes from Petr Broz to make interrogation of

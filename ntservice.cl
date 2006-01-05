@@ -1,3 +1,9 @@
+#+(version= 7 0)
+(sys:defpatch "ntservice" 0
+  "v0: Initial release."
+  :type :system
+  :post-loadable t)
+
 ;; -*- mode: common-lisp -*-
 ;;
 ;; Copyright (C) 2001 Franz Inc, Berkeley, CA.  All rights reserved.
@@ -22,7 +28,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.14 2005/08/03 05:10:29 layer Exp $
+;; $Id: ntservice.cl,v 1.15 2006/01/05 22:29:16 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)

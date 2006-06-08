@@ -35,7 +35,7 @@ v1: major revision for clean exiting."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.16 2006/06/08 18:39:05 layer Exp $
+;; $Id: ntservice.cl,v 1.17 2006/06/08 20:50:05 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -128,117 +128,143 @@ v1: major revision for clean exiting."
 ;; foreign types
 
 (eval-when (compile load eval)
+  (require :winapi)
   (require :foreign)
 
 (def-foreign-type SERVICE_TABLE_ENTRY 
     (:struct
-     (lpServiceName :int)
-     (lpServiceProc :int)))
+     (lpServiceName win:lptstr)
+     (lpServiceProc win::lp)))
 
 (def-foreign-type SERVICE_STATUS
     (:struct
-     (dwServiceType :int)
-     (dwCurrentState :int)
-     (dwControlsAccepted :int)
-     (dwWin32ExitCode :int)
-     (dwServiceSpecificExitCode :int)
-     (dwCheckPoint :int)
-     (dwWaitHint :int)))
+     (dwServiceType win:dword)
+     (dwCurrentState win:dword)
+     (dwControlsAccepted win:dword)
+     (dwWin32ExitCode win:dword)
+     (dwServiceSpecificExitCode win:dword)
+     (dwCheckPoint win:dword)
+     (dwWaitHint win:dword)))
 
 (def-foreign-type ENUM_SERVICE_STATUS
     (:struct
-     (lpServiceName (* :string))
-     (lpDisplayName (* :string))
+     (lpServiceName win:lptstr)
+     (lpDisplayName win:lptstr)
      (ServiceStatus SERVICE_STATUS)))
 )
 
 ;; foreign calls
 
 (def-foreign-call (StartServiceCtrlDispatcher "StartServiceCtrlDispatcherA")
-    ()
+    ((lpServiceTable (* SERVICE_TABLE_ENTRY)))
   :strings-convert t
   :error-value :os-specific
-  :returning :int
+  :returning win:bool
   :release-heap :always)
 
-(def-foreign-call (RegisterServiceCtrlHandler "RegisterServiceCtrlHandlerA") ()
+(def-foreign-call (RegisterServiceCtrlHandler "RegisterServiceCtrlHandlerA")
+    ((lpServiceName win:lpctstr)
+     (lpHandlerProc win::lp))
   :strings-convert t
-  :error-value :os-specific
-  :returning :int)
+  :returning win::lp			; SERVICE_STATUS_HANDLE
+  :error-value :os-specific)
 
-(def-foreign-call (SetServiceStatus "SetServiceStatus") () 
-  :returning :int 
+(def-foreign-call (SetServiceStatus "SetServiceStatus")
+    ((lpServiceHandle win::lp)		; SERVICE_STATUS_HANDLE
+     (lpServiceStatus (* SERVICE_STATUS)))
+  :returning win:bool 
   :error-value :os-specific
   :strings-convert t
   :release-heap :always)
 
-(def-foreign-call (GetLastError "GetLastError") () 
-  :returning :int :strings-convert t)
-
-(def-foreign-call (DebugBreak "DebugBreak") () :strings-convert t)
-
-(def-foreign-call (OutputDebugString "OutputDebugStringA") () 
+(def-foreign-call (OutputDebugString "OutputDebugStringA")
+    ((string win:lpctstr))
   :strings-convert t)
 
-(def-foreign-call (OpenSCManager "OpenSCManagerA") () 
+(def-foreign-call (OpenSCManager "OpenSCManagerA")
+    ((lpMachineName win:lpctstr)
+     (lpDatabaseName win:lpctstr)
+     (wDesiredAccess win:dword))
   :strings-convert t
-  :error-value :os-specific
-  :returning :int)
+  :returning win::lp
+  :error-value :os-specific)
 
-(def-foreign-call (CloseServiceHandle "CloseServiceHandle") ((hSCObject :int)) 
+(def-foreign-call (CloseServiceHandle "CloseServiceHandle")
+    ((hSCObject win::lp)			; SC_HANDLE
+     ) 
   :strings-convert t
-  :returning :int)
+  :returning win:bool)
 
-(def-foreign-call (OpenService "OpenServiceA") () 
+(def-foreign-call (OpenService "OpenServiceA")
+    ((handle win::lp)			; SC_HANDLE
+     (lpServiceName win:lpctstr)
+     (dwDesiredAccess win:dword))
   :strings-convert t
-  :error-value :os-specific
-  :returning :int)
+  :returning win::lp			; SC_HANDLE
+  :error-value :os-specific)
 
 (def-foreign-call (EnumServicesStatus "EnumServicesStatusA") 
-    ((hSCManager :int) 
-     (dwServiceType :int) 
-     (dwServiceState :int) 
+    ((hSCManager win::lp)		; SC_HANDLE
+     (dwServiceType win:dword) 
+     (dwServiceState win:dword) 
      (lpServices (* ENUM_SERVICE_STATUS)) 
-     (cbBufSize :int) 
-     (pcbBytesNeeded (* :int)) 
-     (lpServicesReturned (* :int)) 
-     (lpResumeHandle (* :int)))
+     (cbBufSize win:dword) 
+     (pcbBytesNeeded win:lpdword) 
+     (lpServicesReturned win:lpdword) 
+     (lpResumeHandle win:lpdword))
   :strings-convert t
-  :error-value :os-specific
-  :returning :int)
+  :returning win:bool
+  :error-value :os-specific)
 
-(def-foreign-call (CreateService "CreateServiceA") () 
-  :returning :int 
-  :error-value :os-specific
-  :strings-convert t)
-
-(def-foreign-call (StartService "StartServiceA") ()
-  :returning :int
-  :error-value :os-specific
-  :strings-convert t)
-
-(def-foreign-call (DeleteService "DeleteService") () 
-  :returning :int 
-  :error-value :os-specific
-  :strings-convert t)
-
-(def-foreign-call (QueryServiceStatus "QueryServiceStatus") ()
-  :returning :int
+(def-foreign-call (CreateService "CreateServiceA")
+    ((hSCManager win::lp)		; SC_HANDLE
+     (lpServiceName win:lpctstr)
+     (lpDisplayName win:lpctstr)
+     (dwDesiredAccess win:dword)
+     (dwServiceType win:dword)
+     (dwStartType win:dword)
+     (dwErrorControl win:dword)
+     (lpBinaryPathName win:lpctstr)
+     (lpLoadOrderGroup win:lpctstr)
+     (lpdwTagId win:lpdword)
+     (lpDependencies win:lpctstr)
+     (lpServiceStartName win:lpctstr)
+     (lpPassword win:lpctstr))
+  :returning win::lp			; SC_HANDLE 
   :error-value :os-specific
   :strings-convert t)
 
-(def-foreign-call (ControlService "ControlService") ()
-  :returning :int
+(def-foreign-call (StartService "StartServiceA")
+    ((hService win::lp)			; SC_HANDLE
+     (dwNumServiceArgs win:dword)
+     (lpServiceArgVectors (* win:lpctstr)))
+  :returning win:bool
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (DeleteService "DeleteService")
+    ((hService win::lp)			; SC_HANDLE
+     )
+  :returning win:bool
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (QueryServiceStatus "QueryServiceStatus")
+    ((hService win::lp)			; SC_HANDLE
+     (lpServiceStatus (* SERVICE_STATUS)))
+  :returning win:bool
+  :error-value :os-specific
+  :strings-convert t)
+
+(def-foreign-call (ControlService "ControlService")
+    ((hService win::lp)			; SC_HANDLE
+     (dwControl win:dword)
+     (lpServiceStatus (* SERVICE_STATUS)))
+  :returning win:bool
   :error-value :os-specific
   :strings-convert t
   :release-heap :always)
 
-(def-foreign-call (FormatMessage "FormatMessageA") ()
-  :returning :int :strings-convert nil)
-
-(def-foreign-call LocalFree () :returning :int :strings-convert nil)
-
-#+(version>= 6 2)
 (def-foreign-call (start_tray_icon_watcher "start_tray_icon_watcher") ()
   :returning :int
   :strings-convert nil)
@@ -426,7 +452,7 @@ v1: major revision for clean exiting."
   (debug-msg "set-service-status: retrieving status")
   (multiple-value-bind (res err)
       (SetServiceStatus *service-status-handle* *service-status*)
-    (when (and (zerop res) (null ignore-error))
+    (when (and (null res) (null ignore-error))
       (debug-msg "SetServiceStatus failed: ~A" (winstrerror err))
       (big-exit))))
   
@@ -498,7 +524,7 @@ v1: major revision for clean exiting."
       (debug-msg "calling StartServiceCtrlDispatcher()")
       (multiple-value-bind (res err)
 	  (StartServiceCtrlDispatcher service-table)
-	(when (zerop res)
+	(when (null res)
 	  (debug-msg "StartServiceCtrlDispatcher failed: ~D"
 		     (winstrerror err))))
       
@@ -567,7 +593,7 @@ v1: major revision for clean exiting."
 	  (EnumServicesStatus schandle #.SERVICE_WIN32 #.SERVICE_STATE_ALL
 			      buf bufsize bytes-needed services-returned
 			      resume-handle))
-	(if* (zerop res)
+	(if* (null res)
 	   then (if (not (= errcode #.ERROR_MORE_DATA))
 		    (error "EnumServicesStatus error: ~A"
 			   (winstrerror errcode)))
@@ -623,7 +649,7 @@ v1: major revision for clean exiting."
 	 then
 	      (multiple-value-bind (res err)
 		  (DeleteService handle)
-		(if (= res 0)
+		(if (null res)
 		    (values nil err "DeleteService")
 		  (values t res)))
 	 else
@@ -639,8 +665,7 @@ v1: major revision for clean exiting."
 
 (defun query-service-status (handle ss)
   (multiple-value-bind (res err) (QueryServiceStatus handle ss)
-    (if (zerop res)
-	(error "QueryServiceStatus: ~A" (winstrerror err)))))
+    (when (null res) (error "QueryServiceStatus: ~A" (winstrerror err)))))
 
 (defmacro get-service-state (ss)
   `(fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwCurrentState))
@@ -688,7 +713,7 @@ v1: major revision for clean exiting."
 	
 	(multiple-value-bind (res err)
 	    (StartService handle 0 0)
-	  (when (zerop res) (return (values nil err "StartService")))
+	  (when (null res) (return (values nil err "StartService")))
 	  (when (not wait) (return t)))
 	      
 	;; need to wait.
@@ -716,7 +741,7 @@ v1: major revision for clean exiting."
 	  
 	(multiple-value-bind (res err)
 	    (ControlService handle #.SERVICE_CONTROL_STOP ss)
-	  (when (zerop res)
+	  (when (null res)
 	    (debug-msg "stop-service: ControlService returned zero")
 	    (return-from stop-service (values nil err "ControlService"))))
 
@@ -758,40 +783,4 @@ v1: major revision for clean exiting."
   ;; cause the console window to require closing.
   (exit 0 :no-unwind t :quiet t))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Error message stuff, now in the base Lisp
-
-#+(version>= 7 0)
 (defun winstrerror (code) (excl::get-winapi-error-string code))
-
-#-(version>= 7 0)
-(eval-when (compile eval)
-;; FormatMessage stuff
-(defconstant FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
-(defconstant FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
-(defconstant FORMAT_MESSAGE_FROM_STRING     #x00000400)
-(defconstant FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
-(defconstant FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
-(defconstant FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
-(defconstant FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
-)
-
-#-(version>= 7 0)
-(defun winstrerror (code)
-  (if (not (numberp code))
-      (error "Argument to winsterror should be a number, not ~S" code))
-  (let ((stringptr (ff:allocate-fobject '(* :char) :foreign-static-gc))
-	res)
-    (FormatMessage
-     (logior FORMAT_MESSAGE_FROM_SYSTEM 
-	     FORMAT_MESSAGE_IGNORE_INSERTS
-	     FORMAT_MESSAGE_ALLOCATE_BUFFER) ;; dwFlags
-     0 ;; lpSource
-     code ;; dwMessageId
-     0 ;; dwLanguageId
-     stringptr ;; lpBuffer
-     0  ;; nSize
-     0) ;; Arguments
-    (setf res (native-to-string (ff:fslot-value stringptr)))
-    (LocalFree (ff:fslot-value stringptr))
-    res))

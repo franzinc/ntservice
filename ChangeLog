@@ -1,3 +1,8 @@
+2006-06-08    <layer@HOBART64>
+
+	* ntservice.cl: make it work on win64--previously it was
+	  completely broken on win64
+
 2006-06-08    <layer@HOBART>
 
     changes for bug14069 (apps running as a service require double exit)

@@ -1,3 +1,10 @@
+2006-06-08    <layer@HOBART>
+
+    changes for bug14069 (apps running as a service require double exit)
+	* ntservice/ntservice.cl: changes too numerous to mention
+	* ntservice/testapp.cl: changes too numerous to mention
+	* readme.txt: updates for new functionality
+
 2006-01-05  Kevin Layer  <layer@gemini>
 
 	* ntservice.cl: add defpatch for 7.0

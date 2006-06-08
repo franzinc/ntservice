@@ -1,6 +1,13 @@
 #+(version= 7 0)
-(sys:defpatch "ntservice" 0
-  "v0: Initial release."
+(sys:defpatch "ntservice" 1
+  "v0: Initial release;
+v1: major revision for clean exiting."
+  :type :system
+  :post-loadable t)
+
+#+(version= 8 0)
+(sys:defpatch "ntservice" 1
+  "v1: major revision for clean exiting."
   :type :system
   :post-loadable t)
 
@@ -28,7 +35,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.15 2006/01/05 22:29:16 layer Exp $
+;; $Id: ntservice.cl,v 1.16 2006/06/08 18:39:05 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -42,6 +49,81 @@
 (in-package :ntservice)
 
 (provide :ntservice)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; See readme.txt for user-level information on the NT service module.
+;;
+;; ** How service startup and shutdown works **
+;;
+;; The function execute-service is given three functional arguments: main,
+;; init, and stop.  The `main' routine does the work of the application,
+;; the `init' routine initializes it, and `stop' routine shuts it down.
+;;
+;; execute-service does the work.  It calls StartServiceCtrlDispatcher()
+;; after setting up a Lisp function to get called back when the service
+;; starts and stops.  StartServiceCtrlDispatcher() returns when the service
+;; has stopped.  Here's what the MSDN says about this function [my comments
+;; are in brackets]:
+;;
+;;    When the service control manager starts a service process [the Lisp
+;;    application], it waits for the process to call the
+;;    StartServiceCtrlDispatcher function. The main thread of a service
+;;    process should make this call as soon as possible after it starts
+;;    up. If StartServiceCtrlDispatcher succeeds, it connects the calling
+;;    thread to the service control manager and does not return until all
+;;    running services in the process have terminated. The service control
+;;    manager uses this connection to send control and service start
+;;    requests to the main thread of the service process. The main thread
+;;    acts as a dispatcher by invoking the appropriate HandlerEx function
+;;    to handle control requests, or by creating a new thread to execute
+;;    the appropriate ServiceMain function when a new service is started.
+;;
+;; The function that StartServiceCtrlDispatcher calls is foreign-callable
+;; and is called `service-main'.  This function:
+;;
+;;  1. set the status of the service
+;;  2. calls the `init' function
+;;  3. calls the `main' function
+;;  4. sets the state to `stopped' when the `main' function returns
+;;
+;; In June 06, the code was reworked to make sure exiting a service from
+;; the tray icon (or close button, if that hasn't been disabled), would
+;; work.  Here's what Bob found during the investigation as to why a double
+;; exit was needed:
+;;
+;;    The problem here is that clicking on the close button causes a
+;;    cascade of actions that eventually tries to exit by calling
+;;    mp:exit-from-initial-listener.
+;;
+;;    mp:exit-from-initial-listener looks for an initial listener process
+;;    and if it finds one, it does a process-interrupt to make -that-
+;;    process call exit.
+;;
+;;    Unfortunately, the way ntservice is working, the initial lisp
+;;    listener has made the call to execute-service, which in turn called
+;;    StartServiceCtrlDispatcher, which doesn't return until the service
+;;    shuts down.  We can't actually interrupt a process in a foreign call,
+;;    so the interrupt is a pending request that never gets to run.
+;;    So the first thing we have to do is ensure that the Initial Lisp
+;;    Listener doesn't make that call. Then the existing mechanism will get
+;;    exit called.
+;;
+;;    This isn't quite enough, though. The exit code does a process-kill
+;;    and waits for the processes to go away. The process stuck in a
+;;    foreign call won't go away until the foreign call returns, i.e., the
+;;    service shuts down.
+;;
+;;    So it looks to me like ntservice needs to put something on the
+;;    sys:*exit-cleanup-forms* that will shut down the service in a nice
+;;    way so that the StartServiceCtrlDispatcher call returns and we can do
+;;    a proper cleanup of things.
+;;
+;; In summary: the Initial Lisp Listener process can't call
+;; StartServiceCtrlDispatcher and the service has to be shut down and the
+;; callback into lisp has to return, for there to be a clean exit.  That's
+;; exactly what we now do.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; foreign types
 
@@ -112,7 +194,15 @@
   :error-value :os-specific
   :returning :int)
 
-(def-foreign-call (EnumServicesStatus "EnumServicesStatusA") ((hSCManager :int) (dwServiceType :int) (dwServiceState :int) (lpServices (* ENUM_SERVICE_STATUS)) (cbBufSize :int) (pcbBytesNeeded (* :int)) (lpServicesReturned (* :int)) (lpResumeHandle (* :int)))
+(def-foreign-call (EnumServicesStatus "EnumServicesStatusA") 
+    ((hSCManager :int) 
+     (dwServiceType :int) 
+     (dwServiceState :int) 
+     (lpServices (* ENUM_SERVICE_STATUS)) 
+     (cbBufSize :int) 
+     (pcbBytesNeeded (* :int)) 
+     (lpServicesReturned (* :int)) 
+     (lpResumeHandle (* :int)))
   :strings-convert t
   :error-value :os-specific
   :returning :int)
@@ -148,13 +238,14 @@
 
 (def-foreign-call LocalFree () :returning :int :strings-convert nil)
 
-#+(version>= 6 2 :pre-beta 13)
+#+(version>= 6 2)
 (def-foreign-call (start_tray_icon_watcher "start_tray_icon_watcher") ()
   :returning :int
   :strings-convert nil)
 
 ;;; constants
 
+(eval-when (compile eval)
 (defconstant STANDARD_RIGHTS_REQUIRED #x000F0000)
 
 (defconstant SC_MANAGER_CONNECT             #x0001)
@@ -172,7 +263,6 @@
 	    SC_MANAGER_LOCK              
 	    SC_MANAGER_QUERY_LOCK_STATUS 
 	    SC_MANAGER_MODIFY_BOOT_CONFIG))
-
 
 (defconstant SERVICE_QUERY_CONFIG           #x0001)
 (defconstant SERVICE_CHANGE_CONFIG          #x0002)
@@ -197,9 +287,6 @@
      SERVICE_INTERROGATE          
      SERVICE_USER_DEFINED_CONTROL))
 
-
-
-
 (defconstant SERVICE_WIN32_OWN_PROCESS      #x00000010)
 (defconstant SERVICE_WIN32_SHARE_PROCESS    #x00000020)
 (defconstant SERVICE_WIN32
@@ -222,11 +309,9 @@
 (defconstant SERVICE_ERROR_SEVERE           #x00000002)
 (defconstant SERVICE_ERROR_CRITICAL         #x00000003)
 
-
 ;;
 ;; Controls
 ;;
-(eval-when (compile load eval)
 (defconstant SERVICE_CONTROL_STOP           #x00000001)
 (defconstant SERVICE_CONTROL_PAUSE          #x00000002)
 (defconstant SERVICE_CONTROL_CONTINUE       #x00000003)
@@ -237,7 +322,6 @@
 (defconstant SERVICE_CONTROL_NETBINDREMOVE  #x00000008)
 (defconstant SERVICE_CONTROL_NETBINDENABLE  #x00000009)
 (defconstant SERVICE_CONTROL_NETBINDDISABLE #x0000000A)
-)
 
 ;;
 ;; Service State -- for CurrentState
@@ -264,169 +348,194 @@
 (defconstant NO_ERROR 0)
 (defconstant ERROR_MORE_DATA 234)
 (defconstant ERROR_SERVICE_SPECIFIC_ERROR 1066)
-
-;; FormatMessage stuff
-(defconstant FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
-(defconstant FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
-(defconstant FORMAT_MESSAGE_FROM_STRING     #x00000400)
-(defconstant FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
-(defconstant FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
-(defconstant FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
-(defconstant FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
+)
 
 ;; globals
 
-(defparameter service-status (allocate-fobject 'SERVICE_STATUS :c))
-(defparameter service-status-handle nil)
+(defparameter *service-status* (allocate-fobject 'SERVICE_STATUS :c))
+(defparameter *service-status-handle* nil)
 
-(defparameter service-init-func nil)
-(defparameter service-main-func nil)
-(defparameter service-stop-func nil)
+(defparameter *service-init-func* nil)
+(defparameter *service-main-func* nil)
+(defparameter *service-stop-func* nil)
 
-
-;; macros
+(eval-when (compile eval)
 (defmacro ss-slot (slot) 
-  `(fslot-value-typed 'SERVICE_STATUS :c service-status ,slot))
+  `(fslot-value-typed 'SERVICE_STATUS :c *service-status* ,slot))
+)
 
-
-;; code
-
-(defun-foreign-callable ServiceMain (argc argv)
+(defun-foreign-callable service-main (argc argv)
   (declare (:convention :stdcall))
-  ;;(in-package :ntservice)
   (let ((argv-type `(:array (* :string) ,argc))
-	(service-control-handler-addr (register-foreign-callable 'service-control-handler))
+	(service-control-handler-addr 
+	 (register-foreign-callable 'service-control-handler))
 	err
-	args)
+	args
+	service-name)
     (dotimes (i argc)
       (push (native-to-string (fslot-value-typed argv-type :c argv i)) args))
-    (setf args (rest (reverse args))) ;; drop the service name from the list
+    
+    (setf args (nreverse args))
+    (setf service-name (pop args))
 
-    (multiple-value-setq (service-status-handle err)
-      (RegisterServiceCtrlHandler "Unused" service-control-handler-addr))
-    (when (zerop service-status-handle)
-      (debug-msg (format nil "RegisterServiceCtrlHandler failed~A"
-			 (winstrerror err)))
-      (return-from ServiceMain))
+    ;; The name of the our process is "Immigrant Process".  Make it more
+    ;; obvious what it's really doing:
+    (setf (mp:process-name mp:*current-process*)
+      (format nil "Immigrant Process for service ~s" service-name))
+
+    (multiple-value-setq (*service-status-handle* err)
+      (with-native-string (name service-name)
+	(RegisterServiceCtrlHandler name service-control-handler-addr)))
+    (when (zerop *service-status-handle*)
+      (debug-msg "RegisterServiceCtrlHandler failed: ~A" (winstrerror err))
+      (return-from service-main))
 
     (setf (ss-slot 'dwServiceType) 
-      (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
-    (setf (ss-slot 'dwControlsAccepted) SERVICE_ACCEPT_STOP)
-    (setf (ss-slot 'dwWin32ExitCode) NO_ERROR)
+      #.(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
+    (setf (ss-slot 'dwControlsAccepted) #.SERVICE_ACCEPT_STOP)
+    (setf (ss-slot 'dwWin32ExitCode) #.NO_ERROR)
     (setf (ss-slot 'dwCheckPoint) 0)
     (setf (ss-slot 'dwWaitHint) 10000) ;; 10 seconds
     
-    (when service-init-func
-      (when (null (funcall service-init-func args))
-	(setf (ss-slot 'dwWin32ExitCode) ERROR_SERVICE_SPECIFIC_ERROR)
+    (when *service-init-func*
+      (debug-msg "service-main: calling service init func")
+      (when (null (funcall *service-init-func* args))
+	(debug-msg "service-main: init returned error")
+	(setf (ss-slot 'dwWin32ExitCode) #.ERROR_SERVICE_SPECIFIC_ERROR)
 	(setf (ss-slot 'dwServiceSpecificExitCode) 1)
 	(set-service-status)
-	(return-from ServiceMain)))
+	(debug-msg "service-main: init: returning")
+	(return-from service-main)))
     
-    (setf (ss-slot 'dwCurrentState) SERVICE_RUNNING)
+    (setf (ss-slot 'dwCurrentState) #.SERVICE_RUNNING)
     (setf (ss-slot 'dwCheckPoint) 0)
     (setf (ss-slot 'dwWaitHint) 0)
     (set-service-status)
-    
-    (funcall service-main-func)
 
-    (setf (ss-slot 'dwCurrentState) SERVICE_STOPPED)
-    (set-service-status)))
+    (debug-msg "service-main: calling service main func")
+    (funcall *service-main-func*)
+    (debug-msg "service-main: service main func returned")
 
-(defun set-service-status ()
+    (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
+    (set-service-status
+     ;; This call, for some reason, gets an error when the user explicitly
+     ;; exits the service app. 
+     :ignore-error t)))
+
+(defun set-service-status (&key ignore-error)
+  (debug-msg "set-service-status: retrieving status")
   (multiple-value-bind (res err)
-      (SetServiceStatus service-status-handle service-status)
-    (when (zerop res)
-      (debug-msg (format nil "SetServiceStatus failed: ~A"
-			 (winstrerror err)))
+      (SetServiceStatus *service-status-handle* *service-status*)
+    (when (and (zerop res) (null ignore-error))
+      (debug-msg "SetServiceStatus failed: ~A" (winstrerror err))
       (big-exit))))
-  
-(defun big-exit ()
-  (exit 0 :no-unwind t :quiet t))
   
 (defun-foreign-callable service-control-handler (fdwControl)
   (declare (:convention :stdcall))
-  (debug-msg 
-   (format nil "service-control-handler got control code ~D~%" fdwControl))
   (case fdwControl
     (#.SERVICE_CONTROL_STOP
-     (when service-stop-func
-       (setf (ss-slot 'dwCurrentState) SERVICE_STOP_PENDING)
+     (debug-msg "service-control-handler: got STOP")
+     (when *service-stop-func*
+       (setf (ss-slot 'dwCurrentState) #.SERVICE_STOP_PENDING)
        (set-service-status)
-	     
-       (funcall service-stop-func))
+       (funcall *service-stop-func*))
 
-     (setf (ss-slot 'dwCurrentState) SERVICE_STOPPED)
+     (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
      (set-service-status))
     (#.SERVICE_CONTROL_INTERROGATE
+     (debug-msg "service-control-handler: got INTERROGATE")
      (set-service-status))
-    (t
-     (debug-msg (format nil "That control code is not handled.~%"))))
+    (t (debug-msg "service-control-handler: control code ~A is not handled"
+		  fdwControl)))
   (values))
 
-(defun execute-service (main &key init stop)
+(defun execute-service (service-name main &key init stop)
+  ;; This is so the close button on the console will stop the service.
+  (push `(progn
+	   (debug-msg "Stopping service (~s) from *exit-cleanup-forms*"
+		      ,service-name)
+	   (ntservice:stop-service ,service-name :timeout 4)
+	   ;; Give the service time to really exit.  The sleep time was
+	   ;; determine empirically.
+	   (sleep 3)
+	   (debug-msg "execute-service: cleanup for returning"))
+	sys:*exit-cleanup-forms*)    
+
+  (let ((gate (mp:make-gate nil)))
+    (mp:process-run-function "executing service"
+      (lambda (gate service-name main init stop)
+	(execute-service-1 service-name main init stop)
+	(debug-msg "execute-service: service returned")
+	(mp:open-gate gate)
+	(sleep .1))
+      gate service-name main init stop)
+    (mp:process-wait "waiting for service to complete"
+		     #'mp:gate-open-p gate))
   
-  (setf service-main-func main)
-  (setf service-init-func init)
-  (setf service-stop-func stop)
+  (big-exit))
+
+(defun execute-service-1 (service-name main init stop)
+  (setf *service-main-func* main)
+  (setf *service-init-func* init)
+  (setf *service-stop-func* stop)
   
-  (let* ((ServiceMainAddr (register-foreign-callable 'ServiceMain))
-	 (service-name (string-to-native "Unused"))
+  (let* ((service-main-addr (register-foreign-callable 'service-main))
+	 (service-name (string-to-native service-name))
 	 (service-table-type '(:array SERVICE_TABLE_ENTRY 2))
 	 (service-table (allocate-fobject service-table-type :c)))
-    (macrolet ((st-slot (index slot) `(fslot-value-typed service-table-type :c service-table ,index ,slot)))
+    (macrolet ((st-slot (index slot)
+		 `(fslot-value-typed service-table-type
+				     :c service-table ,index ,slot)))
 
-      (mp:start-scheduler)
-      #-(version>= 7)(mp:start-customs) ;; rfr recommendation.
-
-      (start_tray_icon_watcher) ; ensure that tray icon is visible after login
+      (start_tray_icon_watcher) ;; ensure that tray icon is visible after login
 
       (setf (st-slot 0 'lpServiceName) service-name)  ;; unused
-      (setf (st-slot 0 'lpServiceProc) ServiceMainAddr)
+      (setf (st-slot 0 'lpServiceProc) service-main-addr)
       ;; the null terminating entry
       (setf (st-slot 1 'lpServiceName) 0)
       (setf (st-slot 1 'lpServiceProc) 0)
 
+      (debug-msg "calling StartServiceCtrlDispatcher()")
       (multiple-value-bind (res err)
 	  (StartServiceCtrlDispatcher service-table)
 	(when (zerop res)
-	  (debug-msg 
-	   (format nil "StartServiceCtrlDispatcher failed:  ~D~%"
-		   (winstrerror err)))))
+	  (debug-msg "StartServiceCtrlDispatcher failed: ~D"
+		     (winstrerror err))))
       
       ;; some cleanup
       (aclfree service-name)
-      (free-fobject service-table)
-      
-      ;; The following is necessary to avoid a complaint about not being
-      ;; able to kill a foreign thread.
-      (big-exit))))
+      (free-fobject service-table))))
 
 ;;;;;;;;;;
 
-(defun debug-msg (msg)
-  (OutputDebugString msg))
+;; This is turned on to debug the ntservice module itself.  It is quite
+;; verbose and the output won't likely be interesting to anyone but
+;; someone working on this module.
+(defvar *debug* nil)
 
+(defun debug-msg (format-string &rest format-args)
+  (when *debug*
+    (format excl::*initial-terminal-io*
+	    "~&[~x] ~?~&" (mp::process-os-id mp:*current-process*)
+	    format-string format-args)
+    #+ignore
+    (OutputDebugString (apply #'format nil format-string format-args))))
 
 (defun open-sc-manager (machine database desired-access)
-  (if (null machine)
-      (setf machine 0))
-  (if (null database)
-      (setf database 0))
+  (when (null machine) (setf machine 0))
+  (when (null database) (setf database 0))
   (multiple-value-bind (res err)
       (OpenSCManager machine database desired-access)
-    (if (zerop res)
-	(error "OpenSCManager failed: ~A" (winstrerror err))
-      res)))
-      
+    (if* (zerop res)
+       then (error "OpenSCManager failed: ~A" (winstrerror err))
+       else res)))
 
 (defun close-sc-manager (handle)
   (CloseServiceHandle handle))
 
 (defmacro with-sc-manager ((handle machine database desired-access) &body body)
   `(let ((,handle (open-sc-manager ,machine ,database ,desired-access)))
-     (unwind-protect 
-	 (progn ,@body)
+     (unwind-protect (progn ,@body)
        (close-sc-manager ,handle))))
 
 (defun open-service (smhandle name desired-access)
@@ -438,13 +547,12 @@
 			     &body body)
   `(multiple-value-bind (,handle ,errvar)
        (open-service ,smhandle ,name ,desired-access)
-     (unwind-protect
-	 (progn ,@body)
+     (unwind-protect (progn ,@body)
        (if ,handle (CloseServiceHandle ,handle)))))
 
 ;;; just a test function.
 (defun enum-services ()
-  (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
+  (with-sc-manager (schandle nil nil #.SC_MANAGER_ALL_ACCESS)
     (let ((bytes-needed (allocate-fobject :int :c))
 	  (services-returned (allocate-fobject :int :c))
 	  (resume-handle (allocate-fobject :int :c))
@@ -456,22 +564,26 @@
 	(setf (fslot-value-typed :int :c resume-handle) 0)
 	
 	(multiple-value-setq (res errcode)
-	  (EnumServicesStatus schandle SERVICE_WIN32 SERVICE_STATE_ALL buf bufsize bytes-needed services-returned resume-handle))
+	  (EnumServicesStatus schandle #.SERVICE_WIN32 #.SERVICE_STATE_ALL
+			      buf bufsize bytes-needed services-returned
+			      resume-handle))
 	(if* (zerop res)
-	   then
-		(if (not (= errcode ERROR_MORE_DATA))
+	   then (if (not (= errcode #.ERROR_MORE_DATA))
 		    (error "EnumServicesStatus error: ~A"
 			   (winstrerror errcode)))
 		(setf bufsize (fslot-value-typed :int :c bytes-needed))
 		(setf buf (aclmalloc bufsize))
-	   else
-		(setf errcode 0)))
+	   else (setf errcode 0)))
       
       (let ((count (fslot-value-typed :int :c services-returned)))
 	(dotimes (i count)
 	  (format t "~A -> ~A~%" 
-		  (native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpServiceName)) 
-		  (native-to-string (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count) :c buf i 'lpDisplayName)))))
+		  (native-to-string
+		   (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count)
+				      :c buf i 'lpServiceName)) 
+		  (native-to-string
+		   (fslot-value-typed `(:array ENUM_SERVICE_STATUS ,count)
+				      :c buf i 'lpDisplayName)))))
       
       (aclfree buf)
       (free-fobject bytes-needed)
@@ -479,19 +591,19 @@
       (free-fobject resume-handle))))
 
 (defun create-service (name displaystring cmdline &key (start :manual))
-  (with-sc-manager (schandle nil nil SC_MANAGER_ALL_ACCESS)
+  (with-sc-manager (schandle nil nil #.SC_MANAGER_ALL_ACCESS)
     (multiple-value-bind (res err)
 	(CreateService 
 	 schandle 
 	 name
 	 displaystring
 	 STANDARD_RIGHTS_REQUIRED 
-	 (logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
+	 #.(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
 	 (case start
-	   (:auto SERVICE_AUTO_START)
-	   (:manual SERVICE_DEMAND_START)
+	   (:auto #.SERVICE_AUTO_START)
+	   (:manual #.SERVICE_DEMAND_START)
 	   (t (error "create-service: Unrecognized start type: ~S" start)))
-	 SERVICE_ERROR_NORMAL
+	 #.SERVICE_ERROR_NORMAL
 	 cmdline
 	 0 ;; no load order group
 	 0 ;; no tag identifier
@@ -504,10 +616,9 @@
 	  (values nil err)
 	(values t res)))))
 
-
 (defun delete-service (name)
-  (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
-    (with-open-service (handle err sc name STANDARD_RIGHTS_REQUIRED)
+  (with-sc-manager (sc nil nil #.SC_MANAGER_ALL_ACCESS)
+    (with-open-service (handle err sc name #.STANDARD_RIGHTS_REQUIRED)
       (if* handle
 	 then
 	      (multiple-value-bind (res err)
@@ -526,7 +637,6 @@
 	   ,@body)
        (free-fobject ,var))))
 
-
 (defun query-service-status (handle ss)
   (multiple-value-bind (res err) (QueryServiceStatus handle ss)
     (if (zerop res)
@@ -535,20 +645,20 @@
 (defmacro get-service-state (ss)
   `(fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwCurrentState))
 
-(defmacro service-status-eq (ss status)
-  `(= (get-service-state ,ss) ,status))
+(defmacro service-status-eql (ss status)
+  `(eql (get-service-state ,ss) ,status))
 
 (defmacro service-running-p (ss)
-  `(service-status-eq ,ss SERVICE_RUNNING))
+  `(service-status-eql ,ss #.SERVICE_RUNNING))
 
 (defmacro service-start-pending-p (ss)
-  `(service-status-eq ,ss SERVICE_START_PENDING))
+  `(service-status-eql ,ss #.SERVICE_START_PENDING))
 
 (defmacro service-stopped-p (ss)
-  `(service-status-eq ,ss SERVICE_STOPPED))
+  `(service-status-eql ,ss #.SERVICE_STOPPED))
 
 (defmacro service-stop-pending-p (ss)
-  `(service-status-eq ,ss SERVICE_STOP_PENDING))
+  `(service-status-eql ,ss #.SERVICE_STOP_PENDING))
 
 (defmacro get-service-wait-hint-in-seconds (ss)
   `(/ (fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwWaitHint) 1000.0))
@@ -571,48 +681,46 @@
 
 (defun start-service (name &key (wait t))
   (block nil
-    (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
-      (with-open-service (handle err sc name SERVICE_ALL_ACCESS)
+    (with-sc-manager (sc nil nil #.SC_MANAGER_ALL_ACCESS)
+      (with-open-service (handle err sc name #.SERVICE_ALL_ACCESS)
 	(if (null handle)
 	    (return (values nil err "OpenService")))
 	
 	(multiple-value-bind (res err)
 	    (StartService handle 0 0)
-	  (if (zerop res)
-	      (return (values nil err "StartService")))
-	  
-	  (if (not wait)
-	      (return t)))
+	  (when (zerop res) (return (values nil err "StartService")))
+	  (when (not wait) (return t)))
 	      
 	;; need to wait.
 	(multiple-value-bind (success err)
 	    (wait-for-service-to-start handle)
-	  (if success
-	      t
-	    (values nil err)))))))
+	  (if success t (values nil err)))))))
 
 (defun stop-service (name &key (timeout 30))
-  (block nil
-    (with-sc-manager (sc nil nil SC_MANAGER_ALL_ACCESS)
-      (with-open-service (handle err sc name SERVICE_ALL_ACCESS)
-	(if (null handle)
-	    (return (values nil err "OpenService")))
-	(with-service-status (handle ss)
-	  (if (service-stopped-p ss)
-	      (return t))
-	  (if (service-stop-pending-p ss)
-	      (return (wait-for-service-to-stop handle ss timeout)))
+  (debug-msg "stop-service: stopping ~a" name)
+  (with-sc-manager (sc nil nil #.SC_MANAGER_ALL_ACCESS)
+    (with-open-service (handle err sc name #.SERVICE_ALL_ACCESS)
+      (when (null handle)
+	(debug-msg "stop-service: handle is null")
+	(return-from stop-service (values nil err "OpenService")))
+      (with-service-status (handle ss)
+	(when (service-stopped-p ss)
+	  (debug-msg "stop-service: service stopped")
+	  (return-from stop-service t))
+	(when (service-stop-pending-p ss)
+	  (debug-msg "stop-service: service stop pending")
+	  (return-from stop-service
+	    (wait-for-service-to-stop handle ss timeout)))
 	  
-	  ;; XXXX -- need option to stop dependencies.
+	;; XXXX -- need option to stop dependencies.
 	  
-	  (multiple-value-bind (res err)
-	      (ControlService handle SERVICE_CONTROL_STOP ss)
-	    (if (zerop res)
-		(return (values nil err "ControlService"))))
-	  
-	  (wait-for-service-to-stop handle ss timeout))))))
+	(multiple-value-bind (res err)
+	    (ControlService handle #.SERVICE_CONTROL_STOP ss)
+	  (when (zerop res)
+	    (debug-msg "stop-service: ControlService returned zero")
+	    (return-from stop-service (values nil err "ControlService"))))
 
-
+	(wait-for-service-to-stop handle ss timeout)))))
 
 (defun wait-for-service-to-start (handle)
   (with-service-status (handle ss)
@@ -620,40 +728,55 @@
 	  (old-checkpoint (get-service-checkpoint ss)))
       (while (service-start-pending-p ss)
 	(let ((wait-time  (/ (get-service-wait-hint-in-seconds ss) 10.0)))
-	  (if (< wait-time 1)
-	      (setf wait-time 1))
-	  (if (> wait-time 10)
-	      (setf wait-time 10))
+	  (when (< wait-time 1) (setf wait-time 1))
+	  (when (> wait-time 10) (setf wait-time 10))
 	  (sleep wait-time))
 	
 	;; check again
 	(query-service-status handle ss)
-	(if (not (service-start-pending-p ss))
-	    (return))
+	(when (not (service-start-pending-p ss))
+	  (return))
 
 	(if* (> (get-service-checkpoint ss) old-checkpoint)
-	   then 
-		;; progress is being made.
+	   then ;; progress is being made.
 		(setf old-checkpoint (get-service-checkpoint ss))
 		(setf start-tick-count (get-universal-time))
-	   else
-		;; no progress has been made.. see if we have exceeded
+	   else ;; no progress has been made.. see if we have exceeded
 		;; the wait time.
 		(if (> (- (get-universal-time) start-tick-count)
 		       (get-service-wait-hint-in-seconds ss))
 		    (return-from wait-for-service-to-start 
 		      (values nil :timeout)))))
       
-      (if (service-running-p ss)
-	  t
-	(error "wait-for-service-to-start: Unexpected service state: ~A"
-	       (get-service-state ss))))))
+      (if* (service-running-p ss)
+	 then t
+	 else (error "wait-for-service-to-start: Unexpected service state: ~A"
+		     (get-service-state ss))))))
 
+(defun big-exit ()
+  ;; If anything other than `0' is used, then stopping the service will
+  ;; cause the console window to require closing.
+  (exit 0 :no-unwind t :quiet t))
 
-  
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Error message stuff, now in the base Lisp
 
-;;; Error message stuff
+#+(version>= 7 0)
+(defun winstrerror (code) (excl::get-winapi-error-string code))
 
+#-(version>= 7 0)
+(eval-when (compile eval)
+;; FormatMessage stuff
+(defconstant FORMAT_MESSAGE_ALLOCATE_BUFFER #x00000100)
+(defconstant FORMAT_MESSAGE_IGNORE_INSERTS  #x00000200)
+(defconstant FORMAT_MESSAGE_FROM_STRING     #x00000400)
+(defconstant FORMAT_MESSAGE_FROM_HMODULE    #x00000800)
+(defconstant FORMAT_MESSAGE_FROM_SYSTEM     #x00001000)
+(defconstant FORMAT_MESSAGE_ARGUMENT_ARRAY  #x00002000)
+(defconstant FORMAT_MESSAGE_MAX_WIDTH_MASK  #x000000FF)
+)
+
+#-(version>= 7 0)
 (defun winstrerror (code)
   (if (not (numberp code))
       (error "Argument to winsterror should be a number, not ~S" code))
@@ -672,5 +795,3 @@
     (setf res (native-to-string (ff:fslot-value stringptr)))
     (LocalFree (ff:fslot-value stringptr))
     res))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

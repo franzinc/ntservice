@@ -1,3 +1,9 @@
+2006-06-08    <layer@HOBART>
+
+	* ntservice.cl: rfe6576: shutdown service control function,
+	  changes from Petr Broz
+	* readme.txt: mention new argument to execute-service
+
 2006-06-08    <layer@HOBART64>
 
 	* ntservice.cl: make it work on win64--previously it was

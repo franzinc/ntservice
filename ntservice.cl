@@ -35,7 +35,7 @@ v1: major revision for clean exiting."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.17 2006/06/08 20:50:05 layer Exp $
+;; $Id: ntservice.cl,v 1.18 2006/06/08 21:16:10 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -384,6 +384,7 @@ v1: major revision for clean exiting."
 (defparameter *service-init-func* nil)
 (defparameter *service-main-func* nil)
 (defparameter *service-stop-func* nil)
+(defparameter *service-shutdown-func* nil)
 
 (eval-when (compile eval)
 (defmacro ss-slot (slot) 
@@ -468,14 +469,26 @@ v1: major revision for clean exiting."
 
      (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
      (set-service-status))
+    
+    (#.SERVICE_CONTROL_SHUTDOWN
+     (debug-msg "service-control-handler: got SHUTDOWN")
+     (when *service-shutdown-func*
+       (setf (ss-slot 'dwCurrentState) #.SERVICE_STOP_PENDING)
+       (set-service-status)
+       (funcall *service-shutdown-func*))
+
+     (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
+     (set-service-status))
+    
     (#.SERVICE_CONTROL_INTERROGATE
      (debug-msg "service-control-handler: got INTERROGATE")
      (set-service-status))
+    
     (t (debug-msg "service-control-handler: control code ~A is not handled"
 		  fdwControl)))
   (values))
 
-(defun execute-service (service-name main &key init stop)
+(defun execute-service (service-name main &key init stop shutdown)
   ;; This is so the close button on the console will stop the service.
   (push `(progn
 	   (debug-msg "Stopping service (~s) from *exit-cleanup-forms*"
@@ -489,21 +502,22 @@ v1: major revision for clean exiting."
 
   (let ((gate (mp:make-gate nil)))
     (mp:process-run-function "executing service"
-      (lambda (gate service-name main init stop)
-	(execute-service-1 service-name main init stop)
+      (lambda (gate service-name main init stop shutdown)
+	(execute-service-1 service-name main init stop shutdown)
 	(debug-msg "execute-service: service returned")
 	(mp:open-gate gate)
 	(sleep .1))
-      gate service-name main init stop)
+      gate service-name main init stop shutdown)
     (mp:process-wait "waiting for service to complete"
 		     #'mp:gate-open-p gate))
   
   (big-exit))
 
-(defun execute-service-1 (service-name main init stop)
+(defun execute-service-1 (service-name main init stop shutdown)
   (setf *service-main-func* main)
   (setf *service-init-func* init)
   (setf *service-stop-func* stop)
+  (setf *service-shutdown-func* shutdown)
   
   (let* ((service-main-addr (register-foreign-callable 'service-main))
 	 (service-name (string-to-native service-name))

@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.9 2006/06/08 18:39:05 layer Exp $
+$Id: readme.txt,v 1.10 2006/06/08 21:16:10 layer Exp $
 
 Turn your Common Lisp application into a Windows NT/2000/XP/Server
 2003 service with the ntservice package.
@@ -66,7 +66,8 @@ ntservice:start-service and ntservice:stop-service functions.
 ** function reference
 *******************************************************************************
 
-execute-service service-name main &key init stop	[function]
+execute-service service-name main &key init stop shutdown
+							[function]
 
   'service-name' is a string naming the service.  This name is the
   same name that is used when creating the service (with
@@ -77,7 +78,7 @@ execute-service service-name main &key init stop	[function]
   return [if it does, Windows will complain that the service
   terminated prematurely].
 
-  The keyword arguments 'init' and 'stop' are optional.  
+  The keyword arguments 'init', 'stop' and 'shutdown' are optional.  
 
   'init' specifies a function (or a symbol naming a function) that
   should be executed before the main loop is executed.  Such a
@@ -96,6 +97,10 @@ execute-service service-name main &key init stop	[function]
   exits.  This function should do its job fairly swiftly, otherwise
   Windows might complain that the service isn't stopping properly.  No
   arguments are passed to this function.
+
+  'shutdown' is like 'stop' and specifies a function (or a symbol
+  naming a function) that should be executed when the service is to be
+  stopped due to the computer being shut down.
 
   Please remember that ntservice:execute-service never returns to its
   caller.  It calls (exit 0 :no-unwind t :quiet t) to exit Lisp.

@@ -22,7 +22,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.6 2006/06/08 18:39:05 layer Exp $
+;; $Id: testapp.cl,v 1.7 2006/06/14 15:28:09 layer Exp $
 
 (in-package :user)
 
@@ -57,14 +57,15 @@
 	   ;; makes for easier testing:
 	   (probe-file "./ntservice.fasl")))
 
+(defvar *log-stream* nil)
+
 (defun main (&rest args)
   (setq ntservice::*debug* t)
-  (format t "[~x] args are ~S~%" (mp::process-os-id mp:*current-process*)
-	  args)
+  (setq *log-stream* t)
+  (logit "args are ~S" args)
   (let ((exepath
 	 ;; ignore executable image argument:
-	 (pop args))
-	(shutdown nil))
+	 (pop args)))
 
     (when (member "/install" args :test #'equalp)
       (add-service exepath)
@@ -74,30 +75,38 @@
       (remove-service)
       (return-from main))
 
-    (ntservice:execute-service
-     *servicename*
-     (lambda ()
-       (format t "~&[~x] main: starting...~%"
-	       (mp::process-os-id mp:*current-process*))
-       (loop
-	 (when shutdown (return))
-	 (sleep 1))
-       (format t "~&[~x] main: returning...~%"
-	       (mp::process-os-id mp:*current-process*)))
-     :init (lambda (args)
-	     (tpl:do-command "proc")
-	     (format t "~&[~x] init: Start parameters: ~S~%"
-		     (mp::process-os-id mp:*current-process*) args)
-	     ;; Must return `t' to signify the service started OK;
-	     t)
-     :stop (lambda ()
-	     (format t "~&[~x] stop: Closing down service.~%"
-		     (mp::process-os-id mp:*current-process*))
-	     (setq shutdown t)))
+    (ntservice:execute-service *servicename* #'service-main
+			       :init #'service-init
+			       :stop #'service-stop)
     
-    (format t "~&[~x] reached end of app main~%"
-	    (mp::process-os-id mp:*current-process*))
+    (logit "reached end of app main")
     t))
+
+(defvar *shutting-down* nil)
+
+(defun service-main ()
+  (logit "main: starting")
+  ;; Note that the application is not shutting down:
+  (setq *shutting-down* (mp:make-gate nil))
+  (let ((app
+	 (mp:process-run-function "testapp"
+	   (lambda ()
+	     (logit "main: running testapp")
+	     ;; The real work of the application goes here
+	     (loop (sleep 1))))))
+    (mp:process-wait "waiting for shutdown" #'mp:gate-open-p *shutting-down*)
+    (mp:process-kill app)
+    (logit "main: returning")))
+
+(defun service-init (args)
+  (tpl:do-command "proc")
+  (logit "init: start parameters: ~S" args)
+  ;; Must return `t' to signify the service started OK;
+  t)
+
+(defun service-stop ()
+  (logit "stop: closing down service.")
+  (mp:open-gate *shutting-down*))
 
 (defun build ()
   (compile-file-if-needed "testapp.cl")
@@ -107,22 +116,30 @@
    :allow-existing-directory t))
 
 (defun add-service (exepath)
-  (format t "Installing service...~%")
+  (logit "Installing service")
   (multiple-value-bind (success errcode)
       (ntservice:create-service 
        *servicename*
        *displayname*
        (concatenate 'string exepath " " *commandline*))
     (if success
-	(format t "Installation successful.~%")
+	(logit "Installation successful.")
       (error "ntservice:create-service error: ~A"
 	     (ntservice:winstrerror errcode)))))
 
 (defun remove-service ()
-  (format t "Removing service...~%")
+  (logit "Removing service")
   (multiple-value-bind (success errcode errfunc)
       (ntservice:delete-service *servicename*)
     (if success
-	(format t "Removal successful.~%")
+	(logit "Removal successful.")
       (error "ntservice:delete-service error in ~A: ~A"
 	     errfunc (ntservice:winstrerror errcode)))))
+
+(defun logit (format-string &rest format-args)
+  (when *log-stream*
+    (format *log-stream* "~&[~x] ~?~&"
+	    (mp::process-os-id mp:*current-process*)
+	    format-string
+	    format-args)
+    (force-output *log-stream*)))

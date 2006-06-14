@@ -1,3 +1,7 @@
+2006-06-14    <layer@HOBART>
+
+	* testapp.cl: improvements
+
 2006-06-08    <layer@HOBART>
 
 	* ntservice.cl: rfe6576: shutdown service control function,

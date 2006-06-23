@@ -22,7 +22,7 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: testapp.cl,v 1.7 2006/06/14 15:28:09 layer Exp $
+;; $Id: testapp.cl,v 1.8 2006/06/23 01:10:45 dancy Exp $
 
 (in-package :user)
 
@@ -122,10 +122,10 @@
        *servicename*
        *displayname*
        (concatenate 'string exepath " " *commandline*))
-    (if success
-	(logit "Installation successful.")
-      (error "ntservice:create-service error: ~A"
-	     (ntservice:winstrerror errcode)))))
+    (if* success
+       then (logit "Installation successful.")
+       else (error "ntservice:create-service error: ~A"
+		   (ntservice:winstrerror errcode)))))
 
 (defun remove-service ()
   (logit "Removing service")
@@ -137,9 +137,9 @@
 	     errfunc (ntservice:winstrerror errcode)))))
 
 (defun logit (format-string &rest format-args)
-  (when *log-stream*
-    (format *log-stream* "~&[~x] ~?~&"
-	    (mp::process-os-id mp:*current-process*)
-	    format-string
-	    format-args)
-    (force-output *log-stream*)))
+  (format t "~&[~x] ~?~&"
+	  (mp::process-os-id mp:*current-process*)
+	  format-string
+	  format-args)
+  (finish-output))
+

@@ -1,3 +1,14 @@
+2006-06-22    <dancy@DANCYSOFT>
+
+	* ntservice.cl: Updated defpatch forms.
+
+	Tweaked the service termination process so that race conditions
+	and cpu-yielding problems are removed so that termination shuts
+	down as quickly as possible.
+
+	* testapp.cl: Changed logit function so that it displays
+	information in the program console.
+	
 2006-06-14    <layer@HOBART>
 
 	* testapp.cl: improvements

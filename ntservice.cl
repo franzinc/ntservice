@@ -1,13 +1,15 @@
 #+(version= 7 0)
-(sys:defpatch "ntservice" 1
+(sys:defpatch "ntservice" 2
   "v0: Initial release;
-v1: major revision for clean exiting."
+v1: major revision for clean exiting.
+v2: Reduced delays during service termination."
   :type :system
   :post-loadable t)
 
 #+(version= 8 0)
-(sys:defpatch "ntservice" 1
-  "v1: major revision for clean exiting."
+(sys:defpatch "ntservice" 2
+  "v1: major revision for clean exiting.
+v2: Reduced delays during service termination."
   :type :system
   :post-loadable t)
 
@@ -35,7 +37,7 @@ v1: major revision for clean exiting."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.18 2006/06/08 21:16:10 layer Exp $
+;; $Id: ntservice.cl,v 1.19 2006/06/23 01:10:45 dancy Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -386,11 +388,15 @@ v1: major revision for clean exiting."
 (defparameter *service-stop-func* nil)
 (defparameter *service-shutdown-func* nil)
 
+(defparameter *main-process* nil)
+(defparameter *main-process-gate* nil)
+
 (eval-when (compile eval)
 (defmacro ss-slot (slot) 
   `(fslot-value-typed 'SERVICE_STATUS :c *service-status* ,slot))
 )
 
+;; This operates as an immigrant thread.
 (defun-foreign-callable service-main (argc argv)
   (declare (:convention :stdcall))
   (let ((argv-type `(:array (* :string) ,argc))
@@ -421,13 +427,17 @@ v1: major revision for clean exiting."
       #.(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
     (setf (ss-slot 'dwControlsAccepted) #.SERVICE_ACCEPT_STOP)
     (setf (ss-slot 'dwWin32ExitCode) #.NO_ERROR)
-    (setf (ss-slot 'dwCheckPoint) 0)
-    (setf (ss-slot 'dwWaitHint) 10000) ;; 10 seconds
     
     (when *service-init-func*
       (debug-msg "service-main: calling service init func")
+      (setf (ss-slot 'dwCurrentState) #.SERVICE_START_PENDING)
+      (setf (ss-slot 'dwCheckPoint) 0)
+      (setf (ss-slot 'dwWaitHint) 10000) ;; 10 seconds
+      (set-service-status)
+      
       (when (null (funcall *service-init-func* args))
 	(debug-msg "service-main: init returned error")
+	(setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
 	(setf (ss-slot 'dwWin32ExitCode) #.ERROR_SERVICE_SPECIFIC_ERROR)
 	(setf (ss-slot 'dwServiceSpecificExitCode) 1)
 	(set-service-status)
@@ -439,18 +449,28 @@ v1: major revision for clean exiting."
     (setf (ss-slot 'dwWaitHint) 0)
     (set-service-status)
 
-    (debug-msg "service-main: calling service main func")
-    (funcall *service-main-func*)
-    (debug-msg "service-main: service main func returned")
-
+    (debug-msg "service-main: starting service main func")
+    (setf *main-process-gate* (mp:make-gate nil))
+    (setf *main-process*
+      (mp:process-run-function (format nil "service main for ~a" service-name)
+	#'(lambda ()
+	    (funcall *service-main-func*)
+	    (mp:open-gate *main-process-gate*))))
+    (mp:process-wait 
+     (format nil "waiting for service main for ~a to complete" service-name)
+     #'mp:gate-open-p *main-process-gate*)
+    (debug-msg "service-main: *main-process-gate* opened.")
+    (setf *main-process* nil)
+    
     (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
     (set-service-status
      ;; This call, for some reason, gets an error when the user explicitly
-     ;; exits the service app. 
+     ;; exits the service app.   That's probably because the service
+     ;; status handle has become invalid because the service control
+     ;; dispatcher has terminated.
      :ignore-error t)))
 
 (defun set-service-status (&key ignore-error)
-  (debug-msg "set-service-status: retrieving status")
   (multiple-value-bind (res err)
       (SetServiceStatus *service-status-handle* *service-status*)
     (when (and (null res) (null ignore-error))
@@ -462,14 +482,26 @@ v1: major revision for clean exiting."
   (case fdwControl
     (#.SERVICE_CONTROL_STOP
      (debug-msg "service-control-handler: got STOP")
-     (when *service-stop-func*
-       (setf (ss-slot 'dwCurrentState) #.SERVICE_STOP_PENDING)
-       (set-service-status)
-       (funcall *service-stop-func*))
+     
+     (setf (ss-slot 'dwCurrentState) #.SERVICE_STOP_PENDING)
+     (setf (ss-slot 'dwCheckPoint) 0)
+     ;; Request that programs querying our status check back every
+     ;; second.
+     (setf (ss-slot 'dwWaitHint) 1000) 
+     (set-service-status)
 
-     (setf (ss-slot 'dwCurrentState) #.SERVICE_STOPPED)
-     (set-service-status))
-    
+     (when *service-stop-func*
+       (debug-msg "service-control-handler: Calling service stop function")
+       (funcall *service-stop-func*)
+       (debug-msg "service-control-handler: service stop function returned"))
+
+     (when *main-process*
+       (debug-msg "service-control-handler: Terminating service-main")
+       (mp:process-kill *main-process* :wait t)
+       (debug-msg "service-control-handler: Terminated.")
+       (debug-msg "service-control-handler: opening *main-process-gate*")
+       (mp:open-gate *main-process-gate*)))
+     
     (#.SERVICE_CONTROL_SHUTDOWN
      (debug-msg "service-control-handler: got SHUTDOWN")
      (when *service-shutdown-func*
@@ -488,31 +520,37 @@ v1: major revision for clean exiting."
 		  fdwControl)))
   (values))
 
-(defun execute-service (service-name main &key init stop shutdown)
-  ;; This is so the close button on the console will stop the service.
-  (push `(progn
-	   (debug-msg "Stopping service (~s) from *exit-cleanup-forms*"
-		      ,service-name)
-	   (ntservice:stop-service ,service-name :timeout 4)
-	   ;; Give the service time to really exit.  The sleep time was
-	   ;; determine empirically.
-	   (sleep 3)
-	   (debug-msg "execute-service: cleanup for returning"))
-	sys:*exit-cleanup-forms*)    
+;; It is only safe to exit when this gate is closed
+(defparameter *service-stopped-gate* nil)
 
-  (let ((gate (mp:make-gate nil)))
-    (mp:process-run-function "executing service"
-      (lambda (gate service-name main init stop shutdown)
-	(execute-service-1 service-name main init stop shutdown)
-	(debug-msg "execute-service: service returned")
-	(mp:open-gate gate)
-	(sleep .1))
-      gate service-name main init stop shutdown)
-    (mp:process-wait "waiting for service to complete"
-		     #'mp:gate-open-p gate))
+(defun execute-service (service-name main &key init stop shutdown)
+  (setf *service-stopped-gate* (mp:make-gate nil))
+
+  ;; This is so the close button on the console will stop the service.
+  (push 
+   `(when (not (mp:gate-open-p *service-stopped-gate*))
+      (debug-msg "Stopping service (~s) from *exit-cleanup-forms*"
+		 ,service-name)
+      (ntservice:stop-service ,service-name)
+      (debug-msg "stop-service returned.  Waiting for *service-stopped-gate* for confirmation")
+      (mp:process-wait "waiting for service to complete"
+		       #'mp:gate-open-p *service-stopped-gate*)
+      (debug-msg "Done stopping service from *exit-cleanup-forms*"))
+   sys:*exit-cleanup-forms*)
   
+  (mp:process-run-function "executing service"
+    (lambda (service-name main init stop shutdown)
+      (execute-service-1 service-name main init stop shutdown)
+      (debug-msg "execute-service: service returned")
+      (mp:open-gate *service-stopped-gate*))
+    service-name main init stop shutdown)
+  
+  (mp:process-wait "waiting for service to complete"
+		   #'mp:gate-open-p *service-stopped-gate*)
+  ;; Only reached during normal service shutdown.
   (big-exit))
 
+;; Does not return until the service is stopped.
 (defun execute-service-1 (service-name main init stop shutdown)
   (setf *service-main-func* main)
   (setf *service-init-func* init)
@@ -541,6 +579,7 @@ v1: major revision for clean exiting."
 	(when (null res)
 	  (debug-msg "StartServiceCtrlDispatcher failed: ~D"
 		     (winstrerror err))))
+      (debug-msg "returned from StartServiceCtlDispatcher()")
       
       ;; some cleanup
       (aclfree service-name)
@@ -557,9 +596,8 @@ v1: major revision for clean exiting."
   (when *debug*
     (format excl::*initial-terminal-io*
 	    "~&[~x] ~?~&" (mp::process-os-id mp:*current-process*)
-	    format-string format-args)
-    #+ignore
-    (OutputDebugString (apply #'format nil format-string format-args))))
+	    format-string format-args))
+  (OutputDebugString (apply #'format nil format-string  format-args)))
 
 (defun open-sc-manager (machine database desired-access)
   (when (null machine) (setf machine 0))
@@ -703,7 +741,11 @@ v1: major revision for clean exiting."
   `(/ (fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwWaitHint) 1000.0))
 
 (defmacro sleep-wait-hint-time (ss)
-  `(sleep (get-service-wait-hint-in-seconds ,ss)))
+  (let ((secs (gensym)))
+    `(let ((,secs (get-service-wait-hint-in-seconds ,ss)))
+       (if* (zerop ,secs)
+	  then (sleep 0.5)
+	  else (sleep ,secs)))))
 
 (defmacro get-service-checkpoint (ss)
   `(fslot-value-typed 'SERVICE_STATUS :c ,ss 'dwCheckPoint))

@@ -1,4 +1,4 @@
-$Id: readme.txt,v 1.10 2006/06/08 21:16:10 layer Exp $
+$Id: readme.txt,v 1.11 2007/08/02 20:06:41 layer Exp $
 
 Turn your Common Lisp application into a Windows NT/2000/XP/Server
 2003 service with the ntservice package.
@@ -106,27 +106,49 @@ execute-service service-name main &key init stop shutdown
   caller.  It calls (exit 0 :no-unwind t :quiet t) to exit Lisp.
 
 create-service name displaystring cmdline &key (start :manual)
+					       (interact-with-desktop t)
+					       description
+					       username
+					       (password "")
 							[function]
 
-  'name' should be a string that identifies your service.  The maximum
+  'name' must be a string that identifies your service.  The maximum
   string length is 256 characters. The service control manager
   database preserves the case of the characters, but service name
   comparisons are always case insensitive.  Forward-slash (/) and
   back-slash (\) are invalid service name characters.
 
-  'displaystring' should be a string that contains the display name to
+  'displaystring' must be a string that contains the display name to
   be used by user interface programs to identify the service. This
   string has a maximum length of 256 characters. The name is
   case-preserved in the service control manager. display name
   comparisons are always case-insensitive.
 
-  'cmdline' should be a string that contains the command line for
-  executing your service program.  The first word in the string should
+  'cmdline' must be a string that contains the command line for
+  executing your service program.  The first word in the string must
   be the fully-qualified pathname to the executable.
 
   'start' can either be :manual or :auto.  If :manual, the service
   must be started and stopped manually.  If :auto, the service will
   start automatically at boot time.
+
+  'interact-with-desktop', if true, then the service will be allowed
+  to interact with the desktop.  Note that on Windows Vista,
+  interaction with the desktop is limited, even with
+  'interact-with-desktop' is true.  See
+  http://msdn2.microsoft.com/en-us/library/ms683502.aspx for details.
+ 
+  If 'interact-with-desktop' is true, then 'username' (see below) must be nil.
+
+  'description', if non-nil, must be a string which explains the
+  purpose of the service.  
+
+  'username' specifies the name of the account under which the service
+  should run.  If this parameter is nil or zero, the LocalSystem
+  account will be used.
+
+  'password' specifies the password for the account specified in
+  'username'.  Use a null string ("") if the account has no password.
 
   Return values:
 
@@ -151,6 +173,14 @@ Example:
     Manual start
     Run as LocalSystem account
     Allow program to interact with desktop
+
+ntservice:set-service-description name description  
+							[function]
+
+ 'name' must be the name of an existing service.  'description' must
+ be a string or nil.  If nil, any existing description for the named
+ service will be removed.  Otherwise, the service description for the
+ name service will be set.
 
 ntservice:delete-service name				[function]
 

@@ -1,14 +1,20 @@
-#+(version= 7 0)
-(sys:defpatch "ntservice" 2
-  "v0: Initial release;
-v1: major revision for clean exiting.
-v2: Reduced delays during service termination."
+#+(version= 8 1)
+(sys:defpatch "ntservice" 1
+  "v1: new: set-service-description."
   :type :system
   :post-loadable t)
 
 #+(version= 8 0)
 (sys:defpatch "ntservice" 2
   "v1: major revision for clean exiting.
+v2: Reduced delays during service termination."
+  :type :system
+  :post-loadable t)
+
+#+(version= 7 0)
+(sys:defpatch "ntservice" 2
+  "v0: Initial release;
+v1: major revision for clean exiting.
 v2: Reduced delays during service termination."
   :type :system
   :post-loadable t)
@@ -37,7 +43,7 @@ v2: Reduced delays during service termination."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.20 2007/04/17 21:56:49 layer Exp $
+;; $Id: ntservice.cl,v 1.21 2007/08/02 20:06:41 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -46,6 +52,7 @@ v2: Reduced delays during service termination."
 	   #:execute-service ;; used to be start-service
 	   #:create-service
 	   #:delete-service
+	   #:set-service-description
 	   #:winstrerror))
 
 (in-package :ntservice)
@@ -155,6 +162,10 @@ v2: Reduced delays during service termination."
      (ServiceStatus SERVICE_STATUS)))
 )
 
+(def-foreign-type SERVICE_DESCRIPTION 
+    (:struct
+     (lpDescription win:lptstr)))
+
 ;; foreign calls
 
 (def-foreign-call (StartServiceCtrlDispatcher "StartServiceCtrlDispatcherA")
@@ -235,6 +246,13 @@ v2: Reduced delays during service termination."
   :returning win::lp			; SC_HANDLE 
   :error-value :os-specific
   :strings-convert t)
+
+(def-foreign-call (ChangeServiceConfig2 "ChangeServiceConfig2A")
+    ((hService win::lp)
+     (dwInfoLevel win:dword)
+     (lpInfo win::lp))
+  :returning win:bool
+  :error-value :os-specific)
 
 (def-foreign-call (StartService "StartServiceA")
     ((hService win::lp)			; SC_HANDLE
@@ -361,6 +379,11 @@ v2: Reduced delays during service termination."
 (defconstant SERVICE_CONTINUE_PENDING       #x00000005)
 (defconstant SERVICE_PAUSE_PENDING          #x00000006)
 (defconstant SERVICE_PAUSED                 #x00000007)
+
+;; ChangeServiceConfig2 options
+
+(defconstant SERVICE_CONFIG_DESCRIPTION     1)
+(defconstant SERVICE_CONFIG_FAILURE_ACTIONS 2)
 
 ;;
 ;; Controls Accepted  (Bit Mask)
@@ -668,15 +691,21 @@ v2: Reduced delays during service termination."
       (free-fobject services-returned)
       (free-fobject resume-handle))))
 
-(defun create-service (name displaystring cmdline &key (start :manual))
+(defun create-service (name displaystring cmdline 
+		       &key (start :manual)
+			    (interact-with-desktop t)
+			    description
+			    username ;; LocalSystem
+			    (password ""))
   (with-sc-manager (schandle nil nil #.SC_MANAGER_ALL_ACCESS)
-    (multiple-value-bind (res err)
+    (multiple-value-bind (handle err)
 	(CreateService 
 	 schandle 
 	 name
 	 displaystring
-	 STANDARD_RIGHTS_REQUIRED 
-	 #.(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS) 
+	 #.SERVICE_ALL_ACCESS
+	 (logior #.SERVICE_WIN32_OWN_PROCESS 
+		 (if interact-with-desktop #.SERVICE_INTERACTIVE_PROCESS 0))
 	 (case start
 	   (:auto #.SERVICE_AUTO_START)
 	   (:manual #.SERVICE_DEMAND_START)
@@ -686,13 +715,16 @@ v2: Reduced delays during service termination."
 	 0 ;; no load order group
 	 0 ;; no tag identifier
 	 0 ;; no dependencies 
-	 0 ;; use LocalSystem account
-	 0) ;; no password
-      (if (/= res 0)
-	  (CloseServiceHandle res))
-      (if (zerop res)
-	  (values nil err)
-	(values t res)))))
+	 (or username 0) ;; 0 means LocalSystem
+	 password)
+      (if* (zerop handle)
+	 then ;; error
+	      (values nil err)
+	 else (if description
+		  (set-service-description-1 handle name description))
+	      (CloseServiceHandle handle)
+	      t))))
+      
 
 (defun delete-service (name)
   (with-sc-manager (sc nil nil #.SC_MANAGER_ALL_ACCESS)
@@ -706,6 +738,27 @@ v2: Reduced delays during service termination."
 		  (values t res)))
 	 else
 	      (values nil err "OpenService")))))
+
+(defun set-service-description (name description)
+  (with-sc-manager (sm nil nil #.SC_MANAGER_ALL_ACCESS) 
+    (with-open-service (h err sm name #.SERVICE_ALL_ACCESS)
+      (if (null h)
+	  (error "Failed to open service ~s: ~a"
+		 name (winstrerror err)))
+      (set-service-description-1 h name description))))
+
+(defun set-service-description-1 (handle name description)
+  (if (null description)
+      (setf description ""))
+  (let ((sd (ff:allocate-fobject 'SERVICE_DESCRIPTION :foreign-static-gc)))
+    (with-native-string (description description)
+      (setf (ff:fslot-value sd 'lpDescription) description)
+      (multiple-value-bind (res err)
+	  (ChangeServiceConfig2 handle #.SERVICE_CONFIG_DESCRIPTION
+				sd)
+	(if (zerop res)
+	    (error "Failed to change description for service ~s: ~a"
+		   name (winstrerror err)))))))
 
 (defmacro with-service-status ((handle var) &body body)
   `(let ((,var (allocate-fobject 'SERVICE_STATUS :c)))

@@ -43,7 +43,7 @@ v2: Reduced delays during service termination."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.21 2007/08/02 20:06:41 layer Exp $
+;; $Id: ntservice.cl,v 1.22 2007/08/02 20:11:41 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -138,8 +138,9 @@ v2: Reduced delays during service termination."
 
 (eval-when (compile load eval)
   (require :winapi)
-  (require :foreign)
+  (require :foreign))
 
+(eval-when (compile load eval)
 (def-foreign-type SERVICE_TABLE_ENTRY 
     (:struct
      (lpServiceName win:lptstr)

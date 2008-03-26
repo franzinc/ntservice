@@ -1,6 +1,7 @@
 #+(version= 8 1)
-(sys:defpatch "ntservice" 1
-  "v1: new: set-service-description."
+(sys:defpatch "ntservice" 2
+  "v1: new: set-service-description
+v2: fix error code detection in execute-service."
   :type :system
   :post-loadable t)
 
@@ -43,7 +44,7 @@ v2: Reduced delays during service termination."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.22 2007/08/02 20:11:41 layer Exp $
+;; $Id: ntservice.cl,v 1.23 2008/03/26 05:16:01 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -600,7 +601,7 @@ v2: Reduced delays during service termination."
       (debug-msg "calling StartServiceCtrlDispatcher()")
       (multiple-value-bind (res err)
 	  (StartServiceCtrlDispatcher service-table)
-	(when (null res)
+	(when (zerop res)
 	  (debug-msg "StartServiceCtrlDispatcher failed: ~D"
 		     (winstrerror err))))
       (debug-msg "returned from StartServiceCtlDispatcher()")

@@ -44,7 +44,7 @@ v2: Reduced delays during service termination."
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.23 2008/03/26 05:16:01 layer Exp $
+;; $Id: ntservice.cl,v 1.24 2008/04/10 19:04:02 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)
@@ -866,6 +866,8 @@ v2: Reduced delays during service termination."
 	(let ((wait-time  (/ (get-service-wait-hint-in-seconds ss) 10.0)))
 	  (when (< wait-time 1) (setf wait-time 1))
 	  (when (> wait-time 10) (setf wait-time 10))
+	  (debug-msg "wait-for-service-to-start: waiting ~d seconds"
+		     wait-time)
 	  (sleep wait-time))
 	
 	;; check again

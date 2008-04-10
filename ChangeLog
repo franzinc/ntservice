@@ -1,3 +1,7 @@
+2008-04-10    <layer@HOBART>
+
+	* ntservice.cl: add debug-msg 
+
 2008-03-25    <layer@HOBART>
 
 	* ntservice.cl: bug17763: fix error code detection in

@@ -601,7 +601,7 @@ v2: Reduced delays during service termination."
       (debug-msg "calling StartServiceCtrlDispatcher()")
       (multiple-value-bind (res err)
 	  (StartServiceCtrlDispatcher service-table)
-	(when (zerop res)
+	(when (null res)
 	  (debug-msg "StartServiceCtrlDispatcher failed: ~D"
 		     (winstrerror err))))
       (debug-msg "returned from StartServiceCtlDispatcher()")

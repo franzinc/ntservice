@@ -1,3 +1,9 @@
+2009-05-11  Kevin Layer  <layer@gemini.franz.com>
+
+	* ntservice.cl (execute-service-1): bug17763: fix from Ahmon:
+	  processing return value from StartServiceCtrlDispatcher
+	  incorrectly
+
 2008-04-10    <layer@HOBART>
 
 	* ntservice.cl: add debug-msg 

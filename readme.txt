@@ -1,5 +1,3 @@
-$Id: readme.txt,v 1.11 2007/08/02 20:06:41 layer Exp $
-
 Turn your Common Lisp application into a Windows NT/2000/XP/Server
 2003 service with the ntservice package.
 

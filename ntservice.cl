@@ -1,22 +1,12 @@
-#+(version= 8 1)
-(sys:defpatch "ntservice" 2
-  "v1: new: set-service-description
-v2: fix error code detection in execute-service."
+#+(version= 9 0)
+(sys:defpatch "ntservice" 1
+  "v1: fix stopping services."
   :type :system
   :post-loadable t)
 
-#+(version= 8 0)
-(sys:defpatch "ntservice" 2
-  "v1: major revision for clean exiting.
-v2: Reduced delays during service termination."
-  :type :system
-  :post-loadable t)
-
-#+(version= 7 0)
-(sys:defpatch "ntservice" 2
-  "v0: Initial release;
-v1: major revision for clean exiting.
-v2: Reduced delays during service termination."
+#+(version= 8 2)
+(sys:defpatch "ntservice" 1
+  "v1: fix stopping services."
   :type :system
   :post-loadable t)
 

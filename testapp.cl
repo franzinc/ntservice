@@ -52,11 +52,7 @@
 	   ;; makes for easier testing:
 	   (probe-file "./ntservice.fasl")))
 
-(defvar *log-stream* nil)
-
 (defun main (&rest args)
-  (setq ntservice::*debug* t)
-  (setq *log-stream* t)
   (logit "args are ~S" args)
   (let ((exepath
 	 ;; ignore executable image argument:
@@ -88,8 +84,12 @@
 	   (lambda ()
 	     (logit "main: running testapp")
 	     ;; The real work of the application goes here
-	     (loop (sleep 1))))))
+	     (loop
+	       (sleep 4)
+	       (logit "main: looping"))))))
+    (logit "main: wait for shutdown")
     (mp:process-wait "waiting for shutdown" #'mp:gate-open-p *shutting-down*)
+    (logit "main: process-kill app")
     (mp:process-kill app)
     (logit "main: returning")))
 
@@ -132,9 +132,7 @@
 	     errfunc (ntservice:winstrerror errcode)))))
 
 (defun logit (format-string &rest format-args)
-  (format t "~&[~x] ~?~&"
-	  (mp::process-os-id mp:*current-process*)
-	  format-string
-	  format-args)
-  (finish-output))
+  ;; If you download and run the DebugView app from sysinternals.com, you
+  ;; can see these messages.
+  (apply #'ntservice::debug-msg format-string format-args))
 

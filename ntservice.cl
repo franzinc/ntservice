@@ -178,9 +178,10 @@ v2: Reduced delays during service termination."
   #+smp :release-heap-implies-allow-gc #+smp t
   :release-heap :always)
 
-(def-foreign-call (RegisterServiceCtrlHandler "RegisterServiceCtrlHandlerA")
+(def-foreign-call (RegisterServiceCtrlHandlerEx "RegisterServiceCtrlHandlerExA")
     ((lpServiceName win:lpctstr)
-     (lpHandlerProc win::lp))
+     (lpHandlerProc win::lp)
+     (lpcontext (* :void)))
   :strings-convert t
   :returning win::lp			; SERVICE_STATUS_HANDLE
   :error-value :os-specific)
@@ -429,10 +430,11 @@ v2: Reduced delays during service termination."
   (declare (:convention :stdcall))
   (let ((argv-type `(:array (* :string) ,argc))
 	(service-control-handler-addr 
-	 (register-foreign-callable 'service-control-handler))
+	 (register-foreign-callable 'service-control-handlerex))
 	err
 	args
 	service-name)
+    (debug-msg "service-main: s-c-h-addr #x~x" service-control-handler-addr)
     (dotimes (i argc)
       (push (native-to-string (fslot-value-typed argv-type :c argv i)) args))
     
@@ -444,17 +446,21 @@ v2: Reduced delays during service termination."
     (setf (mp:process-name mp:*current-process*)
       (format nil "Immigrant Process for service ~s" service-name))
 
+    (debug-msg "calling RegisterServiceCtrlHandler")
     (multiple-value-setq (*service-status-handle* err)
       (with-native-string (name service-name)
-	(RegisterServiceCtrlHandler name service-control-handler-addr)))
+	(RegisterServiceCtrlHandlerEx name service-control-handler-addr 0)))
     (when (zerop *service-status-handle*)
       (debug-msg "RegisterServiceCtrlHandler failed: ~A" (winstrerror err))
       (return-from service-main))
 
     (setf (ss-slot 'dwServiceType) 
-      #.(logior SERVICE_WIN32_OWN_PROCESS SERVICE_INTERACTIVE_PROCESS))
+      #.(logior SERVICE_WIN32_OWN_PROCESS
+		;; Removed 7/23/13 because services can't be interactive
+		#+ignore SERVICE_INTERACTIVE_PROCESS))
     (setf (ss-slot 'dwControlsAccepted) #.SERVICE_ACCEPT_STOP)
     (setf (ss-slot 'dwWin32ExitCode) #.NO_ERROR)
+    ;;(setf (ss-slot 'dwServiceSpecificExitCode) #.NO_ERROR)
     
     (when *service-init-func*
       (debug-msg "service-main: calling service init func")
@@ -499,15 +505,21 @@ v2: Reduced delays during service termination."
      :ignore-error t)))
 
 (defun set-service-status (&key ignore-error)
+  (debug-msg "calling SetServiceStatus")
   (multiple-value-bind (res err)
       (SetServiceStatus *service-status-handle* *service-status*)
     (when (and (null res) (null ignore-error))
       (debug-msg "SetServiceStatus failed: ~A" (winstrerror err))
       (big-exit))))
-  
-(defun-foreign-callable service-control-handler (fdwControl)
+
+(defun-foreign-callable service-control-handlerex ((dwControl win:dword)
+						   (dwEventType win:dword)
+						   (lpEventData win:lpvoid)
+						   (lpContext win:lpvoid))
   (declare (:convention :stdcall))
-  (case fdwControl
+  (debug-msg "service-control-handlerex: ~s ~s ~s ~s"
+	     dwControl dwEventType lpEventData lpContext)
+  (case dwControl
     (#.SERVICE_CONTROL_STOP
      (debug-msg "service-control-handler: got STOP")
      
@@ -545,7 +557,7 @@ v2: Reduced delays during service termination."
      (set-service-status))
     
     (t (debug-msg "service-control-handler: control code ~A is not handled"
-		  fdwControl)))
+		  dwControl)))
   (values))
 
 ;; It is only safe to exit when this gate is closed
@@ -572,10 +584,13 @@ v2: Reduced delays during service termination."
       (debug-msg "execute-service: service returned")
       (mp:open-gate *service-stopped-gate*))
     service-name main init stop shutdown)
-  
+
+  (debug-msg "execute-service: waiting for service to complete")
   (mp:process-wait "waiting for service to complete"
 		   #'mp:gate-open-p *service-stopped-gate*)
+  
   ;; Only reached during normal service shutdown.
+  (debug-msg "execute-service: big-exit")
   (big-exit))
 
 ;; Does not return until the service is stopped.
@@ -618,6 +633,8 @@ v2: Reduced delays during service termination."
 ;; This is turned on to debug the ntservice module itself.  It is quite
 ;; verbose and the output won't likely be interesting to anyone but
 ;; someone working on this module.
+;;
+;; Use the DebugView application (sysinternals) to view the messages.
 (defvar *debug* nil)
 
 (defun debug-msg (format-string &rest format-args)

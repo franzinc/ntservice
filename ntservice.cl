@@ -13,7 +13,7 @@
 ;; -*- mode: common-lisp -*-
 ;;
 ;; Copyright (C) 2001 Franz Inc, Berkeley, CA.  All rights reserved.
-;; Copyright (C) 2001-2015 Franz Inc, Oakland, CA.  All rights reserved.
+;; Copyright (C) 2001-2016 Franz Inc, Oakland, CA.  All rights reserved.
 ;;
 ;; This code is free software; you can redistribute it and/or
 ;; modify it under the terms of the version 2.1 of

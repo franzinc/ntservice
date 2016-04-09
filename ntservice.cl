@@ -34,7 +34,6 @@
 ;; version) or write to the Free Software Foundation, Inc., 59 Temple
 ;; Place, Suite 330, Boston, MA  02111-1307  USA
 ;;
-;; $Id: ntservice.cl,v 1.24 2008/04/10 19:04:02 layer Exp $
 
 (defpackage :ntservice 
   (:use :excl :ff :common-lisp)

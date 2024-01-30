@@ -142,7 +142,7 @@
   :strings-convert t
   :error-value :os-specific
   :returning win:bool
-  #+smp :release-heap-implies-allow-gc #+smp t
+  :release-heap-implies-allow-gc t
   :release-heap :always)
 
 (def-foreign-call (RegisterServiceCtrlHandlerEx "RegisterServiceCtrlHandlerExA")
@@ -159,7 +159,7 @@
   :returning win:bool 
   :error-value :os-specific
   :strings-convert t
-  #+smp :release-heap-implies-allow-gc #+smp t
+  :release-heap-implies-allow-gc t
   :release-heap :always)
 
 (def-foreign-call (OutputDebugString "OutputDebugStringA")
@@ -255,7 +255,7 @@
   :returning win:bool
   :error-value :os-specific
   :strings-convert t
-  #+smp :release-heap-implies-allow-gc #+smp t
+  :release-heap-implies-allow-gc t
   :release-heap :always)
 
 (def-foreign-call (start_tray_icon_watcher "start_tray_icon_watcher") ()
